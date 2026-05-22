@@ -34,8 +34,8 @@ The auto-generated `~/.copillm/codex/config.toml` points Codex's model provider 
 ## Pass-through args
 
 ```bash
-copillm codex -- --model gpt-5
-copillm codex -- --help
+copillm codex --model gpt-5
+copillm codex --help
 ```
 
-Everything after `--` is forwarded verbatim to the `codex` binary.
+Any extra flags or positional args are forwarded verbatim to the `codex` binary.

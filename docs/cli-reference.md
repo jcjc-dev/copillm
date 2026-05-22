@@ -52,7 +52,7 @@ All commands accept `--json` for machine-readable output.
    3. cached install at `~/.copillm/bin/<agent>/<version>/`
    4. fresh install via `npm install --prefix ~/.copillm/bin/<agent>/<version>/ <package>@<latest>`
 3. **Print which path/version is being used** (e.g. `→ codex (system PATH, /usr/local/bin/codex, v1.4.7)` or `→ codex (cached, ~/.copillm/bin/codex/1.4.9/, v1.4.9)`).
-4. **Forward all extra arguments** to the underlying agent (`copillm claude -- --model opus`, `copillm codex -- --help`, etc.).
+4. **Forward all extra arguments** to the underlying agent (`copillm claude --model opus`, `copillm codex --help`, etc.).
 5. **Inherit stdio** so the agent fully owns the TTY, and exit with the agent's exit code.
 
 When a fresh install happens, the cache is staged into `~/.copillm/bin/<agent>/.staging-<ver>-<pid>/`, smoke-tested via `--version`, atomically renamed into place, and **all sibling versions are pruned** (we keep the latest only). Leftover staging directories older than one hour are also swept. A file lock at `~/.copillm/bin/<agent>/.lock` serializes concurrent invocations.

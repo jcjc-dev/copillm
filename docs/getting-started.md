@@ -40,11 +40,11 @@ copillm claude     # launches Claude Code
 copillm codex      # launches Codex CLI
 ```
 
-Pass-through args:
+Extra args are forwarded to the underlying agent:
 
 ```bash
-copillm claude -- --model opus
-copillm codex  -- --help
+copillm claude --model opus
+copillm codex --help
 ```
 
 That's it — you're talking to your Copilot seat through the agent of your choice.
