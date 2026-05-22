@@ -1,0 +1,64 @@
+name: Publish to npm
+
+# Tag-driven release flow:
+#   1. Locally: `npm version <patch|minor|major>` (creates commit + v* tag)
+#   2. `git push --follow-tags` (push commit + tag, via PR to main)
+#   3. Draft a GitHub Release against the new `v*` tag and publish it
+#   4. This workflow runs on `release: published` and pushes to npm
+#      using OIDC trusted publishing (no NPM_TOKEN secret required).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # REQUIRED for npm OIDC trusted publishing + provenance
+
+jobs:
+  publish:
+    name: Build, test, and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-publish # optional: lets you require manual approval in repo settings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+
+      # npm >= 11.5.1 is required for OIDC trusted publishing.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund --prefer-offline
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Verify tag matches package.json version
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "Release tag ($tag) does not match package.json version ($pkg)" >&2
+            exit 1
+          fi
+
+      - name: Publish to npm (with provenance)
+        run: npm publish --provenance --access public
