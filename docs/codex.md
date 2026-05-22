@@ -1,5 +1,6 @@
 ---
 title: Using with Codex CLI
+layout: default
 nav_order: 5
 ---
 
