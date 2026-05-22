@@ -1,0 +1,40 @@
+# Build outputs
+dist
+release
+
+# Dependencies
+node_modules
+
+# Logs
+*.log
+logs
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+.claude
+*.swp
+*~
+
+# Env / secrets (never commit)
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# Test / coverage
+coverage
+.nyc_output
+
+# Runtime data the daemon writes (would be under user home, but be defensive
+# in case anyone symlinks the repo as COPILLM_HOME)
+copillm.pid
+credentials.json
+models.cache.json
+
+# pkg standalone-binary scratch
+.pkg-cache
+
