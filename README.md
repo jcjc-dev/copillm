@@ -5,7 +5,7 @@
 [![PR gate](https://github.com/jcjc-dev/copillm/actions/workflows/pr-gate.yml/badge.svg?branch=main)](https://github.com/jcjc-dev/copillm/actions/workflows/pr-gate.yml)
 [![Release gate (nightly + on release)](https://github.com/jcjc-dev/copillm/actions/workflows/release-gate.yml/badge.svg?branch=main&event=schedule)](https://github.com/jcjc-dev/copillm/actions/workflows/release-gate.yml)
 
-A local proxy that exposes OpenAI- and Anthropic-compatible HTTP endpoints backed by your GitHub Copilot subscription. One login — point Codex CLI, Claude Code, or any compatible tool at it and go.
+A local proxy that helps bring your GitHub Copilot CLI seat to its full potential by exposing OpenAI- and Anthropic-compatible HTTP endpoints backed by your existing Copilot subscription. A single login provides a unified gateway that Codex CLI, Claude Code, and other compatible tools can target directly.
 
 > ⚠️ **Experimental / research tool.** Independent, unofficial client of GitHub Copilot's private API. Not affiliated with GitHub, Microsoft, OpenAI, or Anthropic. The upstream API can change without notice. Use at your own risk.
 
@@ -23,7 +23,7 @@ npx copillm claude    # Claude Code, preconfigured
 npx copillm codex     # Codex CLI, preconfigured
 ```
 
-Requires Node.js ≥ 20. That's it — no global install, no config files, no API keys to juggle.
+Requires Node.js 20 or later.
 
 Extra args are forwarded straight to the underlying agent:
 
