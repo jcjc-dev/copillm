@@ -1,5 +1,6 @@
 ---
 title: Using with Claude Code
+layout: default
 nav_order: 4
 ---
 

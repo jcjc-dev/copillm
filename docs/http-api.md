@@ -1,5 +1,6 @@
 ---
 title: HTTP API reference
+layout: default
 nav_order: 6
 ---
 

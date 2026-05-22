@@ -7,21 +7,21 @@ nav_order: 1
 # copillm
 {: .fs-9 }
 
-Unofficial proxy to make your Copilot CLI seat power everything.
+A local proxy that brings Claude Code, Codex CLI, and other coding agents to your existing GitHub Copilot subscription.
 {: .fs-6 .fw-300 }
 
-[Get started now](getting-started/){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
+[Get started](getting-started/){: .btn .btn-primary .fs-5 .mb-4 .mb-md-0 .mr-2 }
 [View on GitHub](https://github.com/jcjc-dev/copillm){: .btn .fs-5 .mb-4 .mb-md-0 }
 
 ---
 
 ## What is copillm?
 
-copillm is a local TypeScript daemon that exposes **OpenAI-compatible** and **Anthropic-compatible** HTTP endpoints, backed by your existing **GitHub Copilot** subscription.
+copillm is a local daemon that exposes **OpenAI-compatible** and **Anthropic-compatible** HTTP endpoints, backed by your existing **GitHub Copilot** subscription.
 
-That means any tool that speaks the OpenAI Chat Completions or Anthropic Messages wire format — Codex CLI, Claude Code, OpenAI SDK scripts, your own bots — can run against your Copilot seat with **zero extra API keys**.
+Any tool that speaks the OpenAI Chat Completions or Anthropic Messages wire format — Claude Code, Codex CLI, OpenAI SDK scripts, your own bots — can run against your Copilot seat without managing additional API keys.
 
-## 30-second tour
+## Getting started
 
 ```bash
 npm install -g copillm   # or use `npx copillm ...` below
@@ -35,25 +35,25 @@ copillm will:
 
 1. Auto-start its background daemon on `http://127.0.0.1:4141`
 2. Resolve (or install) the latest agent binary into `~/.copillm/bin/`
-3. Inject the right env vars (`ANTHROPIC_BASE_URL`, `CODEX_HOME`, etc.)
+3. Inject the required environment variables (`ANTHROPIC_BASE_URL`, `CODEX_HOME`, etc.)
 4. Hand the TTY to the agent
 
-## Why?
+## Why copillm?
 
-- **One subscription, every agent.** Stop juggling Anthropic, OpenAI, and Copilot API keys.
-- **Local-first.** Everything runs on `127.0.0.1`. No third-party servers.
-- **Drop-in.** Existing scripts that hit `api.openai.com` or `api.anthropic.com` work by changing the base URL.
-- **Up-to-date models.** Live discovery against Copilot's `/models` — you get whatever Copilot ships, including 1M-context Claude variants.
+- **One subscription, every agent.** Run Claude Code, Codex CLI, and other compatible tools without managing separate Anthropic, OpenAI, and Copilot API keys.
+- **Local-first.** All traffic stays on `127.0.0.1`; no third-party servers are involved.
+- **Drop-in compatibility.** Existing scripts that target `api.openai.com` or `api.anthropic.com` work by changing the base URL.
+- **Live model catalogue.** Models are discovered live from Copilot's `/models` endpoint, including 1M-context Claude variants.
 
-## Where to next?
+## Documentation
 
-- **[Getting started](getting-started/)** — install, login, first run
-- **[CLI reference](cli-reference/)** — every command and flag
-- **[Using with Claude Code](claude-code/)** — env wiring + the `[1m]` 1M-context alias
-- **[Using with Codex CLI](codex/)** — env wiring + auto-generated `config.toml`
-- **[HTTP API reference](http-api/)** — endpoints, translation caveats
-- **[Development & CI](development/)** — building from source, the PR/release gates
+- **[Getting started](getting-started/)** — installation, authentication, first run
+- **[Commands](commands/)** — every command, grouped by domain (`auth`, `claude`, `codex`, `daemon`, `models`, `env`)
+- **[Using with Claude Code](claude-code/)** — environment wiring and the `[1m]` 1M-context alias
+- **[Using with Codex CLI](codex/)** — environment wiring and `config.toml` generation
+- **[HTTP API reference](http-api/)** — endpoints and translation behaviour
+- **[Development & CI](development/)** — building from source, PR and release gates
 
 ---
 
-> ⚠️ **Experimental / research tool.** This project is an independent, unofficial client of GitHub Copilot's private API. It is not affiliated with, endorsed by, or supported by GitHub, Microsoft, OpenAI, or Anthropic. The upstream private API can change without notice and may stop working. Use at your own risk.
+> **Disclaimer.** copillm is an independent, unofficial client of GitHub Copilot's private API. It is not affiliated with, endorsed by, or supported by GitHub, Microsoft, OpenAI, or Anthropic. The upstream API may change at any time without notice. Use this project at your own risk.

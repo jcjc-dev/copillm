@@ -1,5 +1,6 @@
 ---
 title: Development & CI
+layout: default
 nav_order: 7
 ---
 
