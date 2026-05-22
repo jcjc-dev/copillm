@@ -24,9 +24,11 @@ That means any tool that speaks the OpenAI Chat Completions or Anthropic Message
 ## 30-second tour
 
 ```bash
-npx copillm login    # one-time GitHub device-flow login
-npx copillm claude   # launches Claude Code, fully wired
-npx copillm codex    # launches Codex CLI, fully wired
+npm install -g copillm   # or use `npx copillm ...` below
+
+copillm login    # one-time GitHub device-flow login
+copillm claude   # launches Claude Code, fully wired
+copillm codex    # launches Codex CLI, fully wired
 ```
 
 copillm will:
