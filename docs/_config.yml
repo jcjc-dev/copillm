@@ -1,0 +1,24 @@
+title: copillm
+description: Unofficial proxy to make your Copilot CLI seat power everything.
+remote_theme: just-the-docs/just-the-docs
+url: https://jcjc-dev.github.io
+baseurl: /copillm
+
+permalink: pretty
+
+# just-the-docs settings
+color_scheme: dark
+search_enabled: true
+heading_anchors: true
+
+aux_links:
+  "GitHub":
+    - "https://github.com/jcjc-dev/copillm"
+
+aux_links_new_tab: true
+
+footer_content: "Unofficial. Not affiliated with GitHub, Microsoft, OpenAI, or Anthropic."
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag
