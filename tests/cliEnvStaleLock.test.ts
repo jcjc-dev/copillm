@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -12,53 +12,30 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // a cryptic error when the daemon crashed and left a lockfile behind.
 
 let tmpHome: string | undefined;
-let deadPid: number | undefined;
 const cliPath = path.resolve(__dirname, "..", "dist", "cli.js");
 
 function ensureCliBuilt(): void {
-  const repoRoot = path.resolve(__dirname, "..");
-  const tscEntry = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
-  const result = spawnSync(process.execPath, [tscEntry, "-p", "tsconfig.json"], {
-    cwd: repoRoot,
-    stdio: "inherit"
-  });
-  if (result.status !== 0) {
-    throw new Error(`Failed to build CLI for stale-lock test (exit=${result.status ?? "null"}).`);
+  // CLI is built once via vitest globalSetup (tests/globalBuild.ts); see
+  // that file for why per-file builds were removed.
+  if (!fs.existsSync(cliPath)) {
+    throw new Error(`CLI artifact missing at ${cliPath} — globalSetup did not run.`);
   }
 }
 
-async function spawnAndAwaitDeath(): Promise<number> {
-  // Spawn a tiny child that exits immediately, capture its pid, wait for
-  // it to fully exit. Far more reliable than picking an arbitrary high
-  // pid (which could collide on long-running systems).
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ["-e", "process.exit(0)"]);
-    if (typeof child.pid !== "number") {
-      reject(new Error("Failed to obtain child pid"));
-      return;
-    }
-    const pid = child.pid;
-    child.once("exit", () => {
-      // Give the OS a moment to fully reap; on Windows in particular,
-      // process.kill(pid, 0) immediately after exit can briefly return
-      // success before the kernel finishes cleanup.
-      setTimeout(() => resolve(pid), 100);
-    });
-    child.once("error", reject);
-  });
-}
-
-beforeAll(async () => {
+beforeAll(() => {
   ensureCliBuilt();
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-stale-lock-"));
-  deadPid = await spawnAndAwaitDeath();
-  // Write a lockfile whose pid is dead → inspectLock returns
-  // { state: "stale", reason: "pid_not_alive", ... }.
+  // Use a schema-invalid lock file (missing pid) → inspectLock() returns
+  // { state: "stale", reason: "lock_schema_invalid", ... }. This avoids the
+  // dead-pid approach, which is racy: the OS can reuse a freshly-reaped pid
+  // for an unrelated process between test setup and the CLI invocation,
+  // making inspectLock() report "running" and the CLI exit 1 instead of 2.
+  // The user-facing stale-lock message and exit code are identical for both
+  // reasons, so this gives us the same coverage with zero PID-reuse risk.
   fs.writeFileSync(
     path.join(tmpHome, "copillm.pid"),
     JSON.stringify(
       {
-        pid: deadPid,
         port: 14141,
         started_at_iso: new Date().toISOString()
       },

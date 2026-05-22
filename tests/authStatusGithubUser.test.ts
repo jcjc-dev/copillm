@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
 import fs from "node:fs";
@@ -36,14 +36,10 @@ let mockMode: MockMode = "ok";
 const cliPath = path.resolve(__dirname, "..", "dist", "cli.js");
 
 function ensureCliBuilt(): void {
-  const repoRoot = path.resolve(__dirname, "..");
-  const tscEntry = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
-  const result = spawnSync(process.execPath, [tscEntry, "-p", "tsconfig.json"], {
-    cwd: repoRoot,
-    stdio: "inherit"
-  });
-  if (result.status !== 0) {
-    throw new Error(`Failed to build CLI for auth-status user test (exit=${result.status ?? "null"}).`);
+  // CLI is built once via vitest globalSetup (tests/globalBuild.ts); see
+  // that file for why per-file builds were removed.
+  if (!fs.existsSync(cliPath)) {
+    throw new Error(`CLI artifact missing at ${cliPath} — globalSetup did not run.`);
   }
 }
 

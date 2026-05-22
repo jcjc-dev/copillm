@@ -18,19 +18,13 @@ let tmpHome: string | undefined;
 const cliPath = path.resolve(__dirname, "..", "dist", "cli.js");
 
 function ensureCliBuilt(): void {
-  // Always rebuild — unit tests don't run through any pre-build step and the
-  // on-disk dist/ may not match the in-tree src/ we're trying to validate.
-  // Invoke tsc directly via node rather than going through `npm run build`
-  // so we don't depend on `npm.cmd` resolution (Windows) and avoid Node's
-  // "shell: true with args" deprecation warning.
-  const repoRoot = path.resolve(__dirname, "..");
-  const tscEntry = path.join(repoRoot, "node_modules", "typescript", "bin", "tsc");
-  const result = spawnSync(process.execPath, [tscEntry, "-p", "tsconfig.json"], {
-    cwd: repoRoot,
-    stdio: "inherit"
-  });
-  if (result.status !== 0) {
-    throw new Error(`Failed to build CLI for token-leak test (exit=${result.status ?? "null"}).`);
+  // The CLI is built once by tests/globalBuild.ts (vitest globalSetup) to
+  // avoid concurrent tsc invocations from parallel test files racing to
+  // write into the same dist/ directory. Here we just verify the artifact
+  // is present so failures point at the global setup rather than at a
+  // mysterious "ENOENT cli.js" deep inside a spawn.
+  if (!fs.existsSync(cliPath)) {
+    throw new Error(`CLI artifact missing at ${cliPath} — globalSetup did not run.`);
   }
 }
 
