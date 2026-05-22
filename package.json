@@ -6,6 +6,19 @@
   "bin": {
     "copillm": "./dist/cli.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jcjc-dev/copillm.git"
+  },
   "engines": {
     "node": ">=20"
   },
