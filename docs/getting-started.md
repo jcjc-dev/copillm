@@ -10,12 +10,20 @@ nav_order: 2
 - Node.js ≥ 20
 - A GitHub account with an active **Copilot subscription** (Individual, Business, or Enterprise — Pro+ tier required for Claude/GPT model access)
 
-No global install needed; everything runs through `npx`. For repeatable automation, pin a version (e.g. `npx copillm@0.1.0 ...`).
+## Installation
+
+Install globally from [npm](https://www.npmjs.com/package/copillm) for the most convenient usage:
+
+```bash
+npm install -g copillm
+```
+
+Or invoke it on demand with `npx` (no global install needed). For repeatable automation, pin a version (e.g. `npx copillm@0.1.0 ...`).
 
 ## 1. Log in
 
 ```bash
-npx copillm login
+copillm login
 ```
 
 This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `github.com/login/device`. The resulting token is stored in your OS keychain (via [`keytar`](https://github.com/atom/node-keytar)) when available, otherwise in `~/.copillm/credentials.json` with 0600 perms.
@@ -23,7 +31,7 @@ This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `g
 Verify with:
 
 ```bash
-npx copillm auth status
+copillm auth status
 # stored: true
 # backend: keytar
 # user: { login: "your-handle", name: "Your Name" }

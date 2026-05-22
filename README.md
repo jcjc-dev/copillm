@@ -14,7 +14,15 @@ A local proxy that exposes OpenAI- and Anthropic-compatible HTTP endpoints backe
 
 ## Installation
 
-`copillm` is distributed on npm and can be invoked directly with `npx`. A global install is not required.
+`copillm` is distributed on [npm](https://www.npmjs.com/package/copillm). Install it globally for the most convenient usage:
+
+```bash
+npm install -g copillm
+
+copillm --help
+```
+
+Alternatively, you can invoke it directly with `npx` without a global install:
 
 ```bash
 npx copillm --help
@@ -24,12 +32,12 @@ npx copillm --help
 
 ```bash
 # Authenticate once via the GitHub device flow.
-npx copillm login
+copillm login
 
 # Launch an agent. copillm starts the local daemon, installs the agent if
 # necessary, and configures the required environment variables.
-npx copillm claude
-npx copillm codex
+copillm claude
+copillm codex
 ```
 
 Arguments after the agent name are forwarded to the underlying CLI:
