@@ -37,6 +37,8 @@ import { isShellSyntax, renderEnvBlock, type ShellSyntax } from "./cli/envBlock.
 import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle, type ClaudeEnvBundle, type CodexEnvBundle } from "./cli/agentEnv.js";
 import { launchAgent } from "./cli/launchAgent.js";
 import type { AgentName } from "./cli/resolveAgent.js";
+import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
+import { registerConfigCommands } from "./cli/configCommands.js";
 
 const logger = createLogger();
 const program = new Command();
@@ -733,78 +735,132 @@ program
   .description("Launch Codex CLI against copillm (auto-starts daemon, downloads codex if missing)")
   .option("--copillm-use <spec>", "Pin codex package version (e.g. 1.4.7 or @openai/codex@1.4.7)")
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
+  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
+  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to codex")
-  .action(async (forwardedArgs: string[], opts: { copillmUse?: string; copillmDebug?: boolean }) => {
-    const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
-    const codex = await refreshCodexHome(lock.port, null);
-    if (!codex) {
-      throw new Error("Failed to prepare Codex home (see warning above).");
+  .action(
+    async (
+      forwardedArgs: string[],
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+    ) => {
+      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const codex = await refreshCodexHome(lock.port, null);
+      if (!codex) {
+        throw new Error("Failed to prepare Codex home (see warning above).");
+      }
+      const bundle = buildCodexEnvBundle(codex.outDir);
+      const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CODEX_VERSION ?? undefined;
+      const applyResult = applyAgentConfig({
+        agent: "codex",
+        cwd: process.cwd(),
+        codexHomeDir: codex.outDir,
+        profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+        skip: Boolean(opts.copillmNoConfig)
+      });
+      for (const line of formatApplyNotes(applyResult, "codex")) {
+        process.stderr.write(`${line}\n`);
+      }
+      const env = { ...bundle.env, ...applyResult.envOverlay };
+      const exitCode = await launchAgent({
+        agent: "codex",
+        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        env,
+        pinnedSpec
+      });
+      process.exit(exitCode);
     }
-    const bundle = buildCodexEnvBundle(codex.outDir);
-    const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CODEX_VERSION ?? undefined;
-    const exitCode = await launchAgent({
-      agent: "codex",
-      args: forwardedArgs ?? [],
-      env: bundle.env,
-      pinnedSpec
-    });
-    process.exit(exitCode);
-  });
+  );
 
 program
   .command("claude")
   .description("Launch Claude Code against copillm (auto-starts daemon, downloads claude if missing)")
   .option("--copillm-use <spec>", "Pin claude package version (e.g. 1.0.0 or @anthropic-ai/claude-code@1.0.0)")
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
+  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
+  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to claude")
-  .action(async (forwardedArgs: string[], opts: { copillmUse?: string; copillmDebug?: boolean }) => {
-    const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
-    const claude = buildClaudeExportCommand(lock.port, null);
-    const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CLAUDE_VERSION ?? undefined;
-    const conflicts = detectClaudeSettingsConflicts(claude.bundle.env);
-    for (const line of formatSettingsConflictWarning(conflicts)) {
-      process.stderr.write(`${line}\n`);
+  .action(
+    async (
+      forwardedArgs: string[],
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+    ) => {
+      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const claude = buildClaudeExportCommand(lock.port, null);
+      const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CLAUDE_VERSION ?? undefined;
+      const conflicts = detectClaudeSettingsConflicts(claude.bundle.env);
+      for (const line of formatSettingsConflictWarning(conflicts)) {
+        process.stderr.write(`${line}\n`);
+      }
+      const applyResult = applyAgentConfig({
+        agent: "claude",
+        cwd: process.cwd(),
+        profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+        skip: Boolean(opts.copillmNoConfig)
+      });
+      for (const line of formatApplyNotes(applyResult, "claude")) {
+        process.stderr.write(`${line}\n`);
+      }
+      const env = { ...claude.bundle.env, ...applyResult.envOverlay };
+      const exitCode = await launchAgent({
+        agent: "claude",
+        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        env,
+        pinnedSpec
+      });
+      process.exit(exitCode);
     }
-    const exitCode = await launchAgent({
-      agent: "claude",
-      args: forwardedArgs ?? [],
-      env: claude.bundle.env,
-      pinnedSpec
-    });
-    process.exit(exitCode);
-  });
+  );
 
 program
   .command("pi")
   .description("Launch pi coding agent against copillm (auto-starts daemon, downloads pi if missing)")
   .option("--copillm-use <spec>", "Pin pi package version (e.g. 0.75.4 or @earendil-works/pi-coding-agent@0.75.4)")
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
+  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
+  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to pi")
-  .action(async (forwardedArgs: string[], opts: { copillmUse?: string; copillmDebug?: boolean }) => {
-    const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
-    const pi = await refreshPiHome(lock.port);
-    if (!pi) {
-      throw new Error("Failed to prepare pi models.json (see warning above).");
+  .action(
+    async (
+      forwardedArgs: string[],
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+    ) => {
+      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const pi = await refreshPiHome(lock.port);
+      if (!pi) {
+        throw new Error("Failed to prepare pi models.json (see warning above).");
+      }
+      const bundle = buildPiEnvBundle(pi.outDir);
+      const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_PI_VERSION ?? undefined;
+      const applyResult = applyAgentConfig({
+        agent: "pi",
+        cwd: process.cwd(),
+        profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+        skip: Boolean(opts.copillmNoConfig)
+      });
+      for (const line of formatApplyNotes(applyResult, "pi")) {
+        process.stderr.write(`${line}\n`);
+      }
+      const env = { ...bundle.env, ...applyResult.envOverlay };
+      const exitCode = await launchAgent({
+        agent: "pi",
+        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        env,
+        pinnedSpec
+      });
+      process.exit(exitCode);
     }
-    const bundle = buildPiEnvBundle(pi.outDir);
-    const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_PI_VERSION ?? undefined;
-    const exitCode = await launchAgent({
-      agent: "pi",
-      args: forwardedArgs ?? [],
-      env: bundle.env,
-      pinnedSpec
-    });
-    process.exit(exitCode);
-  });
+  );
+
+registerConfigCommands(program);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   if (error instanceof Error) {

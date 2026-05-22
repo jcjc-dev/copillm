@@ -96,6 +96,17 @@ export function mapCopilotModelToCodex(model: CopilotModel): CodexModelInfo {
   const vendor = getNested<string>(model, "vendor") ?? "Unknown";
   const displayName = getNested<string>(model, "name") ?? model.id;
 
+  // Derive vision support from the upstream Copilot capability flag rather
+  // than advertising image input for every model. Models without
+  // `capabilities.supports.vision === true` (e.g. gpt-3.5-turbo, gpt-4-0613,
+  // gpt-4o-mini) would 400 on image content if we claimed otherwise.
+  // `capabilities.limits.vision` (when present) carries per-model image
+  // budgets — image count, byte size, allowed media types. We don't surface
+  // those limits in Codex's schema (it has no field for them today), but the
+  // boolean gate alone is enough to prevent advertising image_modality on
+  // text-only models.
+  const supportsVision = getNested<boolean>(model, "capabilities", "supports", "vision") === true;
+
   return {
     slug: model.id,
     display_name: displayName,
@@ -120,13 +131,13 @@ export function mapCopilotModelToCodex(model: CopilotModel): CodexModelInfo {
     web_search_tool_type: "text",
     truncation_policy: { mode: "bytes", limit: 10_000 },
     supports_parallel_tool_calls: parallelTools,
-    supports_image_detail_original: false,
+    supports_image_detail_original: supportsVision,
     context_window: contextWindow,
     max_context_window: contextWindow,
     auto_compact_token_limit: null,
     effective_context_window_percent: 95,
     experimental_supported_tools: [],
-    input_modalities: ["text", "image"],
+    input_modalities: supportsVision ? ["text", "image"] : ["text"],
     supports_search_tool: false
   };
 }

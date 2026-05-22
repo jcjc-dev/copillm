@@ -52,6 +52,12 @@ src/
   translation/
     openaiAnthropic.ts                  # request body + non-streaming response translation
     streamingOpenAIToAnthropic.ts       # SSE translator (canonical Anthropic event sequence)
+  agentconfig/
+    schema.ts                           # zod schemas for ~/.copillm/agent.toml
+    load.ts                             # parse + merge global + project TOML, env-expand
+    render.ts                           # per-agent renderers (codex/claude/pi/copilot)
+    apply.ts                            # orchestrate load → render → write
+    markerBlock.ts                      # marker-block upsert + backup-on-drift helpers
   codex/init.ts                # generates ~/.copillm/codex/config.toml
   claude/cache.ts              # clears ~/.claude/cache/gateway-models.json on stop
 tests/
@@ -80,6 +86,7 @@ tests/
 - **Bearer tokens are memory-only**, never persisted to disk. The GitHub OAuth token persists (OS keychain, `~/.copillm/credentials.json` fallback, or in-memory `"session"` backend). Don't write bearers anywhere.
 - **Credential file fallback** is gated by `COPILLM_ALLOW_PLAINTEXT_CREDENTIALS=1` in non-TTY contexts. Don't relax this gate.
 - **`auth status` and the `status.auth` block never print the token.** They use `inspectStoredCredential()` (which reports presence + backend only), not `loadStoredCredential()` (which returns the token). `tests/authStatusCli.test.ts` enforces this with a substring-leak guard. Don't wire status surfaces through `loadStoredCredential`.
+- **Unified agent config lives in TOML at `~/.copillm/agent.toml` (global) and `<cwd>/.copillm/agent.toml` (project overlay).** The loader (`src/agentconfig/load.ts`) fails closed on duplicate TOML keys, schema violations, unresolved `${VAR}` expansions, and `mcpServers` name collisions between copillm-managed and user-owned entries. Renderers (`src/agentconfig/render.ts`) MUST preserve user-owned entries: Claude's `.mcp.json` keeps unrelated `mcpServers.*` and tracks copillm-owned names in a sibling `_copillmManaged` array; AGENTS.md / CLAUDE.md use the `<!-- copillm:managed begin -->` … `<!-- copillm:managed end -->` marker block. Compute every FileWrite in memory before touching disk — no partial writes on error.
 
 ## Test fixtures and naming
 
