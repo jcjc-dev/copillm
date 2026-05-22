@@ -25,11 +25,11 @@ npx copillm codex     # Codex CLI, preconfigured
 
 Requires Node.js ≥ 20. That's it — no global install, no config files, no API keys to juggle.
 
-Pass extra args through with `--`:
+Extra args are forwarded straight to the underlying agent:
 
 ```bash
-copillm claude -- --model opus
-copillm codex  -- --help
+copillm claude --model opus
+copillm codex --help
 ```
 
 ---
