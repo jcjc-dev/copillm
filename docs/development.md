@@ -63,11 +63,11 @@ The release-gate workflow accepts `workflow_dispatch` inputs to pin specific pac
 
 ## Releasing
 
-Tag and push:
+Releases are fully automated from `package.json`:
 
-```bash
-git tag v0.x.y
-git push --tags
-```
+1. Open a PR that bumps `version` in `package.json` (and `package-lock.json`).
+2. Once `pr-gate` is green, merge it to `main`.
+3. `auto-tag.yml` notices the version field changed, creates `v<version>` tag + GitHub Release with auto-generated notes.
+4. The Release triggers `publish.yml`, which runs the release-gate matrix and (only on green) publishes to npm with provenance.
 
-Then publish to npm — `prepack` rebuilds, so `dist/cli.js` is always fresh.
+No local `git tag` / `npm version` / `gh release create` steps required. If you need to retry, re-running `auto-tag.yml` via `workflow_dispatch` is a no-op when the tag already exists.
