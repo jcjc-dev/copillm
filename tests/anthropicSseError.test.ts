@@ -16,12 +16,17 @@ interface ResponseCapture {
 function fakeResponse(): { capture: ResponseCapture; res: ServerResponse } {
   const capture: ResponseCapture = { writes: [], ended: false };
   const res = {
+    writable: true,
+    writableEnded: false,
+    destroyed: false,
+    headersSent: false,
     write(chunk: string): boolean {
       capture.writes.push(chunk);
       return true;
     },
     end(): void {
       capture.ended = true;
+      (this as { writableEnded: boolean }).writableEnded = true;
     }
   } as unknown as ServerResponse;
   return { capture, res };
@@ -94,6 +99,10 @@ describe("writeAnthropicSseError", () => {
     let ended = false;
     let callCount = 0;
     const res = {
+      writable: true,
+      writableEnded: false,
+      destroyed: false,
+      headersSent: false,
       write(chunk: string): boolean {
         callCount += 1;
         if (callCount === 2) {
@@ -104,10 +113,63 @@ describe("writeAnthropicSseError", () => {
       },
       end(): void {
         ended = true;
+        (this as { writableEnded: boolean }).writableEnded = true;
       }
     } as unknown as ServerResponse;
 
     expect(() => writeAnthropicSseError(res, { messageId: "msg_x" }, "boom")).toThrow();
     expect(ended).toBe(true);
+  });
+
+  it("is a no-op write path when res is already destroyed (does not throw)", () => {
+    // Regression for the daemon-crash scenario: after a client disconnects
+    // mid-stream the response is no longer writable. writeAnthropicSseError
+    // must not throw ERR_STREAM_DESTROYED — that would escape into the
+    // request handler's outer catch and crash the process.
+    let writeAttempts = 0;
+    const res = {
+      writable: false,
+      writableEnded: false,
+      destroyed: true,
+      headersSent: true,
+      write(_: string): boolean {
+        writeAttempts += 1;
+        throw new Error("ERR_STREAM_DESTROYED");
+      },
+      end(): void {
+        // already destroyed; safeEnd should skip
+      }
+    } as unknown as ServerResponse;
+
+    expect(() =>
+      writeAnthropicSseError(res, { messageId: "msg_destroyed" }, "internal_error")
+    ).not.toThrow();
+    expect(writeAttempts).toBe(0);
+  });
+
+  it("survives benign socket errors thrown from res.write (EPIPE / ECONNRESET) without re-throwing", () => {
+    // Real Node sometimes throws an EPIPE synchronously from .write when the
+    // client just went away. We swallow these so the outer catch in proxy.ts
+    // never sees them.
+    let endCalled = false;
+    const res = {
+      writable: true,
+      writableEnded: false,
+      destroyed: false,
+      headersSent: true,
+      write(_: string): boolean {
+        const err = new Error("write EPIPE") as Error & { code: string };
+        err.code = "EPIPE";
+        throw err;
+      },
+      end(): void {
+        endCalled = true;
+      }
+    } as unknown as ServerResponse;
+
+    expect(() =>
+      writeAnthropicSseError(res, { messageId: "msg_epipe" }, "internal_error")
+    ).not.toThrow();
+    expect(endCalled).toBe(true);
   });
 });

@@ -22,6 +22,13 @@ import { translateOpenAIStreamToAnthropic, writeAnthropicPrelude, type Anthropic
 import { buildCodexCatalog } from "./codexSchema.js";
 import { getGithubUserSummary, GithubUserFetchError } from "./debugInfo.js";
 import { buildAnthropicModelsResponse } from "./anthropicModelsResponse.js";
+import {
+  attachRequestLifecycle,
+  isBenignSocketError,
+  safeEnd,
+  safeSendJson,
+  safeWrite
+} from "./requestLifecycle.js";
 
 const COPILOT_HEADERS = {
   "Content-Type": "application/json",
@@ -89,6 +96,7 @@ export async function startProxyServer(input: {
     const requestId = randomUUID();
     const startedAt = Date.now();
     const pathname = safePathname(req.url);
+    const lifecycle = attachRequestLifecycle(req, res, input.logger, requestId);
     res.on("finish", () => {
       input.logger.info(
         {
@@ -247,10 +255,19 @@ export async function startProxyServer(input: {
           body: upstreamBody,
           requestId,
           logger: input.logger,
-          upstreamPath
+          upstreamPath,
+          signal: lifecycle.signal
         });
         await forwardResponse(upstream, route.anthroShape, res, requestedModel ?? undefined, prelude);
       } catch (error) {
+        if (isBenignSocketError(error)) {
+          input.logger.debug(
+            { event: "upstream_aborted", request_id: requestId, err: error },
+            "upstream request aborted (client disconnected)"
+          );
+          safeEnd(res);
+          return;
+        }
         if (error instanceof CopilotTokenManagerError) {
           if (prelude) {
             writeAnthropicSseError(res, prelude, "token_refresh_failed");
@@ -278,8 +295,36 @@ export async function startProxyServer(input: {
         sendJson(res, 400, { error: error.code, detail: error.message });
         return;
       }
-      input.logger.error({ err: error }, "request failed");
+      if (isBenignSocketError(error)) {
+        input.logger.debug(
+          { event: "request_client_gone", request_id: requestId, err: error },
+          "request handler aborted because client disconnected"
+        );
+        safeEnd(res);
+        return;
+      }
+      input.logger.error({ err: error, request_id: requestId }, "request failed");
       sendJson(res, 500, { error: "internal_error" });
+      safeEnd(res);
+    }
+  });
+
+  server.on("clientError", (err, socket) => {
+    input.logger.debug(
+      { event: "client_error", code: (err as { code?: unknown } | null)?.code },
+      "malformed HTTP from client"
+    );
+    if (socket.writable) {
+      try {
+        socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+      } catch {
+        // Socket likely already gone — nothing to do.
+      }
+    }
+    try {
+      socket.destroy();
+    } catch {
+      // best effort
     }
   });
 
@@ -309,10 +354,14 @@ async function postToCopilot(input: {
   requestId: string;
   logger: Logger;
   upstreamPath: string;
+  signal?: AbortSignal;
 }): Promise<Response> {
   let forceRefresh = false;
   let authRefreshRetried = false;
   for (let attempt = 1; attempt <= MAX_UPSTREAM_ATTEMPTS; attempt += 1) {
+    if (input.signal?.aborted) {
+      throw abortErrorFromSignal(input.signal);
+    }
     try {
       const response = await postWithCurrentBearer(
         input.tokenManager,
@@ -320,7 +369,8 @@ async function postToCopilot(input: {
         input.body,
         forceRefresh,
         input.requestId,
-        input.upstreamPath
+        input.upstreamPath,
+        input.signal
       );
       forceRefresh = false;
 
@@ -347,6 +397,10 @@ async function postToCopilot(input: {
 
       return response;
     } catch (error) {
+      if (isBenignSocketError(error)) {
+        // Client disconnected — propagate so the request handler can clean up.
+        throw error;
+      }
       if (!isRetryableTransportError(error) || attempt >= MAX_UPSTREAM_ATTEMPTS) {
         throw error;
       }
@@ -366,7 +420,8 @@ async function postWithCurrentBearer(
   body: unknown,
   forceRefresh: boolean,
   requestId: string,
-  upstreamPath: string
+  upstreamPath: string,
+  signal?: AbortSignal
 ): Promise<Response> {
   const bearer = await tokenManager.ensureToken({ forceRefresh });
   return fetch(`${accountBaseUrl(accountType)}${upstreamPath}`, {
@@ -376,8 +431,19 @@ async function postWithCurrentBearer(
       Authorization: `Bearer ${bearer}`,
       "X-Request-Id": requestId
     },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
+}
+
+function abortErrorFromSignal(signal: AbortSignal): Error {
+  const reason = signal.reason;
+  if (reason instanceof Error) {
+    return reason;
+  }
+  const err = new Error("Request aborted by client");
+  (err as { name: string }).name = "AbortError";
+  return err;
 }
 
 async function forwardResponse(
@@ -477,7 +543,16 @@ async function pipeEventStream(upstream: Response, res: ServerResponse): Promise
   if (res.socket && typeof res.socket.setNoDelay === "function") {
     res.socket.setNoDelay(true);
   }
-  await pipeline(Readable.fromWeb(upstream.body as any), res);
+  try {
+    await pipeline(Readable.fromWeb(upstream.body as any), res);
+  } catch (error) {
+    if (isBenignSocketError(error)) {
+      // Client went away mid-stream — normal for SSE consumers (Codex,
+      // Claude Code, pi) that cancel pending responses on user input.
+      return;
+    }
+    throw error;
+  }
 }
 
 function isEventStream(upstream: Response): boolean {
@@ -510,19 +585,21 @@ function beginAnthropicSseResponse(res: ServerResponse, req?: IncomingMessage): 
 export function writeAnthropicSseError(res: ServerResponse, prelude: AnthropicStreamPrelude, code: string): void {
   void prelude;
   try {
-    res.write(
+    safeWrite(
+      res,
       `event: message_delta\ndata: ${JSON.stringify({
         type: "message_delta",
         delta: { stop_reason: "end_turn", stop_sequence: null },
         usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 }
       })}\n\n`
     );
-    res.write(
+    safeWrite(
+      res,
       `event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "api_error", message: code } })}\n\n`
     );
-    res.write(`event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
+    safeWrite(res, `event: message_stop\ndata: ${JSON.stringify({ type: "message_stop" })}\n\n`);
   } finally {
-    res.end();
+    safeEnd(res);
   }
 }
 
@@ -556,9 +633,7 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  res.statusCode = status;
-  res.setHeader("Content-Type", "application/json");
-  res.end(JSON.stringify(payload));
+  safeSendJson(res, status, payload);
 }
 
 function readRequestedModel(payload: unknown): null | string {

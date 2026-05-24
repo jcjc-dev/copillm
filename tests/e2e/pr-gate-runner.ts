@@ -84,6 +84,106 @@ async function main(): Promise<void> {
       assertGreaterThan(result.eventCount, 5, "claude SSE should emit multiple events");
     });
 
+    await runScenario(failures, "client-disconnect-resilience", async () => {
+      // Regression test: previously, a client disconnecting mid-stream (or an
+      // upstream error after headers flushed) could cause the daemon process
+      // to exit with ERR_HTTP_HEADERS_SENT / ERR_STREAM_DESTROYED. This
+      // scenario aborts several streams in rapid succession across both
+      // protocol shapes, then asserts the daemon's PID is unchanged and a
+      // normal request still succeeds.
+      const startingPid = daemon!.pid;
+
+      // 3x abort against /codex/v1/responses
+      for (let i = 0; i < 3; i += 1) {
+        const controller = new AbortController();
+        const response = await fetch(`${daemon!.baseUrl}/codex/v1/responses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: "Bearer copillm-local-test" },
+          body: JSON.stringify({
+            model: "gpt-test-codex",
+            input: [{ type: "message", role: "user", content: [{ type: "input_text", text: `abort-${i}` }] }],
+            stream: true
+          }),
+          signal: controller.signal
+        });
+        if (response.body) {
+          const reader = response.body.getReader();
+          try {
+            // Read one chunk so headers have committed, then abort.
+            await reader.read();
+          } catch { /* ignore */ }
+          controller.abort();
+          try { await reader.cancel(); } catch { /* ignore */ }
+        }
+      }
+
+      // 3x abort against /anthropic/v1/messages
+      for (let i = 0; i < 3; i += 1) {
+        const controller = new AbortController();
+        const response = await fetch(`${daemon!.baseUrl}/anthropic/v1/messages`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer copillm-local-test",
+            "anthropic-version": "2023-06-01"
+          },
+          body: JSON.stringify({
+            model: "claude-test-sonnet",
+            max_tokens: 64,
+            stream: true,
+            messages: [{ role: "user", content: `abort-${i}` }]
+          }),
+          signal: controller.signal
+        });
+        if (response.body) {
+          const reader = response.body.getReader();
+          try {
+            await reader.read();
+          } catch { /* ignore */ }
+          controller.abort();
+          try { await reader.cancel(); } catch { /* ignore */ }
+        }
+      }
+
+      // Give the daemon a moment to settle (ping intervals, etc).
+      await new Promise((r) => setTimeout(r, 1500));
+
+      // Daemon process must still exist with the same PID.
+      try {
+        process.kill(startingPid, 0);
+      } catch {
+        throw new Error(`daemon pid ${startingPid} is no longer alive after 6 mid-stream aborts`);
+      }
+
+      // /livez must still respond.
+      const livez = await fetch(`${daemon!.baseUrl}/livez`);
+      if (livez.status !== 200) {
+        throw new Error(`/livez returned ${livez.status} after abort storm`);
+      }
+
+      // A complete, normal request must still succeed end-to-end on both shapes.
+      const codexResult = await codexLikeChat({
+        copillmBaseUrl: daemon!.baseUrl,
+        model: "gpt-test-codex",
+        prompt: "after-abort"
+      });
+      assertEquals(codexResult.fullText, "ok-from-mock:gpt-test-codex", "post-abort codex chat should still complete");
+
+      const claudeResult = await claudeLikeChat({
+        copillmBaseUrl: daemon!.baseUrl,
+        model: "claude-test-sonnet",
+        prompt: "after-abort"
+      });
+      assertEquals(claudeResult.fullText, "ok-from-mock:claude-test-sonnet", "post-abort claude chat should still complete");
+
+      // Re-confirm the PID after the post-recovery requests.
+      try {
+        process.kill(startingPid, 0);
+      } catch {
+        throw new Error(`daemon pid ${startingPid} died after the recovery request`);
+      }
+    });
+
     await runScenario(failures, "pi-config-written", async () => {
       // `copillm start` (via spawn-copillm) writes ~/.pi/agent/models.json into
       // the daemon's isolated $HOME. Verify it actually landed and is well-formed.

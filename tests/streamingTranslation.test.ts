@@ -254,4 +254,111 @@ describe("streamingOpenAIToAnthropic", () => {
     };
     expect(deltaEvent.delta.text).toBe("split");
   });
+
+  it("stops pinging and resolves cleanly when downstream is destroyed mid-stream", async () => {
+    // Regression for the daemon-crash scenario: the ping interval used to fire
+    // forever after the client disconnected, throwing ERR_STREAM_DESTROYED
+    // from inside a timer callback (uncaughtException → process exit).
+    const upstream = new PassThrough();
+    const downstream = new PassThrough();
+    downstream.on("data", () => {
+      /* drain */
+    });
+    const done = translateOpenAIStreamToAnthropic({
+      upstream,
+      downstream,
+      fallbackModel: "claude-test"
+    });
+
+    // Feed one chunk so we get past message_start.
+    upstream.write(
+      `data: ${JSON.stringify({
+        id: "chatcmpl-disconnect",
+        model: "claude-test",
+        choices: [{ index: 0, delta: { role: "assistant", content: "" } }]
+      })}\n\n`
+    );
+
+    // Wait for the chunk to be processed.
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Capture writes after destroy to prove the translator stops writing.
+    const writesAfterDestroy: unknown[] = [];
+    const originalWrite = downstream.write.bind(downstream);
+    (downstream as { write: unknown }).write = (chunk: unknown) => {
+      writesAfterDestroy.push(chunk);
+      return originalWrite(chunk as never);
+    };
+
+    // Now destroy the downstream — simulates the client socket closing.
+    downstream.destroy();
+
+    // Let several ping intervals elapse (PING_INTERVAL_MS = 1000).
+    await new Promise((r) => setTimeout(r, 1200));
+
+    // Close the upstream so the translator's loop terminates.
+    upstream.end();
+
+    // The translator's promise must resolve, NOT reject, on disconnect.
+    await expect(done).resolves.toBeUndefined();
+
+    // And no pings should have leaked through after destroy.
+    const pingsAfter = writesAfterDestroy.filter(
+      (w) => typeof w === "string" && w.includes("event: ping")
+    );
+    expect(pingsAfter.length).toBe(0);
+  });
+
+  it("survives downstream.write throwing ERR_STREAM_DESTROYED synchronously", async () => {
+    // The translator must swallow benign socket errors thrown synchronously
+    // from downstream.write — they're a normal symptom of mid-flush close.
+    const upstream = Readable.from([
+      `data: ${JSON.stringify({
+        id: "chatcmpl-err",
+        model: "claude-test",
+        choices: [{ index: 0, delta: { role: "assistant", content: "hi" } }]
+      })}\n\n`,
+      "data: [DONE]\n\n"
+    ]);
+    const downstream = new PassThrough();
+    let throwCount = 0;
+    (downstream as { write: unknown }).write = () => {
+      throwCount += 1;
+      const err = new Error("ERR_STREAM_DESTROYED") as Error & { code: string };
+      err.code = "ERR_STREAM_DESTROYED";
+      throw err;
+    };
+
+    await expect(
+      translateOpenAIStreamToAnthropic({ upstream, downstream, fallbackModel: "claude-test" })
+    ).resolves.toBeUndefined();
+    expect(throwCount).toBeGreaterThan(0);
+  });
+
+  it("does not throw when downstream emits 'close' before upstream completes", async () => {
+    const upstream = new PassThrough();
+    const downstream = new PassThrough();
+    downstream.on("data", () => {
+      /* drain */
+    });
+    const done = translateOpenAIStreamToAnthropic({
+      upstream,
+      downstream,
+      fallbackModel: "claude-test"
+    });
+
+    await new Promise((r) => setTimeout(r, 10));
+    downstream.emit("close");
+
+    upstream.write(
+      `data: ${JSON.stringify({
+        id: "chatcmpl-close",
+        model: "claude-test",
+        choices: [{ index: 0, delta: { content: "after close" } }]
+      })}\n\n`
+    );
+    upstream.end();
+
+    await expect(done).resolves.toBeUndefined();
+  });
 });
