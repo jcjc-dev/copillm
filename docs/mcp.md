@@ -1,0 +1,199 @@
+---
+title: MCP & agent.toml
+layout: default
+nav_order: 6
+---
+
+# MCP & `agent.toml`
+
+copillm is a **MCP configuration aggregator**. You declare your MCP servers once in `~/.copillm/agent.toml`, and copillm fans them out to each coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`).
+
+copillm itself does **not** speak the MCP wire protocol — it just renders the right files for each downstream agent.
+
+## File locations
+
+| Scope | Path | Purpose |
+| ----- | ---- | ------- |
+| Global | `~/.copillm/agent.toml` | Defaults + profiles available to every project |
+| Project | `<cwd>/.copillm/agent.toml` | Overlay; deep-merged on top of global at load time |
+
+If neither file exists, copillm skips fan-out entirely — your agents launch unaffected.
+
+## Quick start
+
+```bash
+copillm config init       # scaffold ~/.copillm/agent.toml
+$EDITOR ~/.copillm/agent.toml
+copillm config show       # preview the resolved active profile
+copillm config sync --agent claude   # render Claude's mcp.json without launching
+copillm claude            # launch, fan-out runs automatically
+```
+
+## Minimal example
+
+```toml
+active_profile = "default"
+
+[profiles.default.mcp.servers.playwright]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@playwright/mcp@latest"]
+
+[profiles.default.mcp.servers.github]
+transport = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GITHUB_TOKEN}" }
+```
+
+## Server schema
+
+Every entry under `[<section>.mcp.servers.<name>]` is one of three shapes.
+
+### stdio (local process)
+
+```toml
+[profiles.default.mcp.servers.kusto]
+transport = "stdio"
+command = "agency"
+args = ["mcp", "kusto", "--database", "1ESPTInsights"]
+env = { KUSTO_AUTH = "${KUSTO_AUTH}" }   # optional
+cwd = "/opt/agency"                       # optional
+scope = "user"                            # optional: "project" | "user"
+```
+
+### http / sse (remote)
+
+```toml
+[profiles.default.mcp.servers.github]
+transport = "http"      # or "sse"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GITHUB_TOKEN}" }
+scope = "user"
+```
+
+### Unset (remove inherited server)
+
+To strip a server inherited from `[defaults]` or the global file in a specific profile:
+
+```toml
+[profiles.work.mcp.servers.playwright]
+inherit = "@unset"
+```
+
+### Server name rules
+
+Names must match `^[A-Za-z0-9_-]+$` — letters, digits, dashes, underscores. Anything else is rejected at render time (TOML identifier requirement for the Codex output).
+
+## Profiles & merging
+
+`agent.toml` is layered. At load time, copillm deep-merges these in order:
+
+1. Global `[defaults]`
+2. Global `[profiles.<active>]`
+3. Project `[defaults]`
+4. Project `[profiles.<active>]`
+
+Later layers overwrite earlier ones. The `mcp.servers` map merges per-key: same-named entries fully replace; `inherit = "@unset"` removes.
+
+```toml
+active_profile = "work"
+
+[defaults.mcp.servers.playwright]
+transport = "stdio"
+command = "npx"
+args = ["-y", "@playwright/mcp@latest"]
+
+[profiles.default]
+# inherits playwright from defaults
+
+[profiles.work.mcp.servers.ado]
+transport = "stdio"
+command = "agency"
+args = ["mcp", "ado"]
+
+[profiles.work.mcp.servers.playwright]
+inherit = "@unset"   # work profile drops playwright
+```
+
+### Switching profiles
+
+```bash
+copillm config profile list      # show all profiles, * marks active
+copillm config profile use work  # set active_profile in global agent.toml
+copillm config sync --agent claude --profile work   # one-off override
+```
+
+The `--profile` flag on `sync` and `show` overrides `active_profile` for that invocation only.
+
+## Environment variable expansion
+
+`${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `url`, `env` values, and `headers` values at load time:
+
+```toml
+[profiles.default.mcp.servers.github]
+transport = "http"
+url = "https://api.githubcopilot.com/mcp/"
+headers = { Authorization = "Bearer ${GITHUB_TOKEN}" }
+
+[profiles.default.mcp.servers.kusto]
+transport = "stdio"
+command = "agency"
+args = ["mcp", "kusto", "--database", "${KUSTO_DB:-1ESPTInsights}"]
+```
+
+If `${VAR}` is unset and no `:-default` is provided, load fails with a clear error.
+
+## How fan-out works per agent
+
+`copillm <agent>` (or `copillm config sync --agent <agent>`) renders the resolved profile into each agent's native format.
+
+### Claude Code
+
+- Writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` — **never** touches `<cwd>` or your user-scope `~/.claude.json`.
+- On launch, copillm appends `--mcp-config ~/.copillm/claude/mcp.json` to the `claude` argv. This is purely additive: Claude continues to load any project-scope `./.mcp.json` and user-scope entries you maintain yourself.
+- When the active profile declares no MCP servers, the managed file is removed and no `--mcp-config` flag is added.
+- Instructions fan-out is **not supported** for Claude. Place project guidance in your own `CLAUDE.md` or global guidance in `~/.claude/CLAUDE.md`.
+
+### Codex CLI
+
+- Injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml`.
+- The block is delimited with hash-comment markers so subsequent runs replace just the managed section.
+- Requires `copillm start` (or any prior launch) to have generated the base `config.toml` first.
+
+### pi
+
+- Writes a `copillm-mcp` extension into `~/.pi/agent/extensions/copillm-mcp/` (`servers.json` + `index.ts`).
+- v1 lists servers via a `/copillm-mcp` slash command; full stdio/http transport wiring is deferred to a follow-up.
+
+### Copilot CLI
+
+- Currently a no-op stub. The native format is not yet publicly documented.
+
+## Instructions block (bonus)
+
+Same file also fans out instructions to each agent (AGENTS.md / pi prompt) inside a `<!-- copillm:managed begin/end -->` marker so the rest of those files stays yours. **Not supported for Claude** — copillm never writes to `CLAUDE.md`; manage that file yourself.
+
+```toml
+[profiles.default.instructions]
+body = """
+Always cite the file:line when referencing code.
+Prefer ripgrep over find.
+"""
+```
+
+## Commands reference
+
+| Command | What it does |
+| ------- | ------------ |
+| `copillm config init` | Scaffold `~/.copillm/agent.toml` |
+| `copillm config show [--profile <name>]` | Print the resolved, env-expanded profile |
+| `copillm config profile list` | List profiles (active marked with `*`) |
+| `copillm config profile use <name>` | Set `active_profile` in global file |
+| `copillm config sync --agent <kind> [--profile <name>]` | Fan-out without launching the agent. `<kind>` ∈ `codex \| claude \| pi \| copilot` |
+
+## Troubleshooting
+
+- **`Required env var "FOO" is not set`** — export it, or add `${FOO:-default}` in your TOML.
+- **`MCP server name "x" is not a valid TOML identifier`** — only `[A-Za-z0-9_-]+`. Rename it.
+- **`Codex config not found at …`** — run `copillm start` (or `copillm codex` once) so the base `config.toml` exists, then re-sync.
+- **Nothing happens on launch** — neither `~/.copillm/agent.toml` nor `<cwd>/.copillm/agent.toml` exists. Run `copillm config init`.
