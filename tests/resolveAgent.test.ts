@@ -62,13 +62,15 @@ describe("parsePinSpec", () => {
 });
 
 describe("packageNameFor / binNameFor", () => {
-  it("maps codex/claude/pi to upstream npm packages and bin names", () => {
+  it("maps codex/claude/pi/copilot to upstream npm packages and bin names", () => {
     expect(packageNameFor("codex")).toBe("@openai/codex");
     expect(packageNameFor("claude")).toBe("@anthropic-ai/claude-code");
     expect(packageNameFor("pi")).toBe("@earendil-works/pi-coding-agent");
+    expect(packageNameFor("copilot")).toBe("@github/copilot");
     expect(binNameFor("codex")).toBe("codex");
     expect(binNameFor("claude")).toBe("claude");
     expect(binNameFor("pi")).toBe("pi");
+    expect(binNameFor("copilot")).toBe("copilot");
   });
 });
 

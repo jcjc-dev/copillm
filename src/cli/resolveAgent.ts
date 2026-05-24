@@ -4,19 +4,21 @@ import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getCopillmHome } from "../config/home.js";
 
-export type AgentName = "codex" | "claude" | "pi";
+export type AgentName = "codex" | "claude" | "pi" | "copilot";
 export type ResolveSource = "path" | "cache" | "installed";
 
 const NPM_PACKAGES: Record<AgentName, string> = {
   codex: "@openai/codex",
   claude: "@anthropic-ai/claude-code",
-  pi: "@earendil-works/pi-coding-agent"
+  pi: "@earendil-works/pi-coding-agent",
+  copilot: "@github/copilot"
 };
 
 const BIN_NAMES: Record<AgentName, string> = {
   codex: "codex",
   claude: "claude",
-  pi: "pi"
+  pi: "pi",
+  copilot: "copilot"
 };
 
 export interface ResolveOptions {

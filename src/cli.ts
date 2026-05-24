@@ -860,6 +860,57 @@ program
     }
   );
 
+program
+  .command("copilot")
+  .description("Launch GitHub Copilot CLI reusing copillm's stored GitHub token (no second device flow)")
+  .option("--copillm-use <spec>", "Pin copilot package version (e.g. 1.0.52 or @github/copilot@1.0.52)")
+  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
+  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
+  .allowUnknownOption(true)
+  .passThroughOptions()
+  .helpOption(false)
+  .argument("[args...]", "Args forwarded to copilot")
+  .action(
+    async (
+      forwardedArgs: string[],
+      opts: { copillmUse?: string; copillmProfile?: string; copillmNoConfig?: boolean }
+    ) => {
+      const credential = await loadStoredCredential();
+      if (!credential) {
+        process.stderr.write(
+          "copillm: no stored GitHub credential — run `copillm auth login` first.\n"
+        );
+        process.exit(1);
+        return;
+      }
+      const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_COPILOT_VERSION ?? undefined;
+      const applyResult = applyAgentConfig({
+        agent: "copilot",
+        cwd: process.cwd(),
+        profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+        skip: Boolean(opts.copillmNoConfig)
+      });
+      for (const line of formatApplyNotes(applyResult, "copilot")) {
+        process.stderr.write(`${line}\n`);
+      }
+      // Inject the stored GitHub OAuth token into the child env only — never
+      // export to the parent shell and never persist. Copilot CLI honours
+      // COPILOT_GITHUB_TOKEN ahead of its own stored credentials, so this
+      // short-circuits its device-flow login when copillm already has a token.
+      const env: Record<string, string> = {
+        ...applyResult.envOverlay,
+        COPILOT_GITHUB_TOKEN: credential.token
+      };
+      const exitCode = await launchAgent({
+        agent: "copilot",
+        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        env,
+        pinnedSpec
+      });
+      process.exit(exitCode);
+    }
+  );
+
 registerConfigCommands(program);
 
 program.parseAsync(process.argv).catch((error: unknown) => {
