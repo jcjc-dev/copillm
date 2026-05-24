@@ -1,4 +1,13 @@
-name: Release gate
+name: Upstream e2e
+
+# Cross-platform e2e against the real published @openai/codex and
+# @anthropic-ai/claude-code packages. Acts as:
+#   - a nightly canary that catches upstream wire-format regressions
+#     even when copillm itself hasn't changed
+#   - the pre-publish gate invoked by release.yml (via workflow_call)
+#     before pushing a new version to npm
+#
+# Does not run on PRs (pr-gate.yml covers those with synthetic clients).
 
 on:
   schedule:
@@ -28,7 +37,7 @@ on:
         default: "@anthropic-ai/claude-code@latest"
 
 concurrency:
-  group: release-gate-${{ github.workflow }}-${{ github.ref }}
+  group: upstream-e2e-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -65,7 +74,7 @@ jobs:
         env:
           CI: "true"
 
-      - name: E2E release-gate runner (real @openai/codex + @anthropic-ai/claude-code)
+      - name: E2E upstream runner (real @openai/codex + @anthropic-ai/claude-code)
         run: npm run test:e2e:release
         env:
           CI: "true"

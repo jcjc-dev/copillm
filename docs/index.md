@@ -53,7 +53,7 @@ copillm will:
 - **[Using with Codex CLI](codex/)** — environment wiring and `config.toml` generation
 - **[MCP & `agent.toml`](mcp/)** — declare MCP servers once, fan out to every agent
 - **[HTTP API reference](http-api/)** — endpoints and translation behaviour
-- **[Development & CI](development/)** — building from source, PR and release gates
+- **[Development & CI](development/)** — building from source, PR gate, upstream e2e, release pipeline
 
 ---
 
