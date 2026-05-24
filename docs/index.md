@@ -51,6 +51,7 @@ copillm will:
 - **[Commands](commands/)** — every command, grouped by domain (`auth`, `claude`, `codex`, `daemon`, `models`, `env`)
 - **[Using with Claude Code](claude-code/)** — environment wiring and the `[1m]` 1M-context alias
 - **[Using with Codex CLI](codex/)** — environment wiring and `config.toml` generation
+- **[MCP & `agent.toml`](mcp/)** — declare MCP servers once, fan out to every agent
 - **[HTTP API reference](http-api/)** — endpoints and translation behaviour
 - **[Development & CI](development/)** — building from source, PR and release gates
 

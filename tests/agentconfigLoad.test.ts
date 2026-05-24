@@ -71,7 +71,7 @@ command = "project-cmd"
     expect(db && db.transport === "stdio" ? db.command : null).toBe("project-cmd");
   });
 
-  it("@unset removes inherited server", () => {
+  it("rejects `inherit = \"@unset\"` (defaults are always-on; profiles cannot remove them)", () => {
     writeGlobal(`
 [defaults.mcp.servers.db]
 transport = "stdio"
@@ -80,8 +80,38 @@ command = "default-cmd"
 [profiles.minimal.mcp.servers.db]
 inherit = "@unset"
 `);
-    const result = loadAgentConfig({ cwd: tmpCwd, profileOverride: "minimal" });
-    expect(result?.resolved.mcpServers.db).toBeUndefined();
+    expect(() => loadAgentConfig({ cwd: tmpCwd, profileOverride: "minimal" })).toThrow(AgentConfigError);
+  });
+
+  it("defaults always apply even under a non-default active profile", () => {
+    writeGlobal(`
+[defaults.mcp.servers.always_on]
+transport = "stdio"
+command = "default-cmd"
+
+[profiles.work.mcp.servers.work_only]
+transport = "stdio"
+command = "work-cmd"
+`);
+    const result = loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" });
+    expect(result?.resolved.mcpServers.always_on).toBeDefined();
+    expect(result?.resolved.mcpServers.work_only).toBeDefined();
+  });
+
+  it("profile entry with the same name overrides a default", () => {
+    writeGlobal(`
+[defaults.mcp.servers.db]
+transport = "stdio"
+command = "default-cmd"
+
+[profiles.work.mcp.servers.db]
+transport = "stdio"
+command = "work-cmd"
+`);
+    const result = loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" });
+    const db = result?.resolved.mcpServers.db;
+    expect(db?.transport).toBe("stdio");
+    expect(db && db.transport === "stdio" ? db.command : null).toBe("work-cmd");
   });
 
   it("rejects duplicate TOML keys with parser diagnostic", () => {
