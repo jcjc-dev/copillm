@@ -1,11 +1,11 @@
 name: Publish to npm
 
-# Tag-driven release flow:
-#   1. Locally: `npm version <patch|minor|major>` (creates commit + v* tag)
-#   2. `git push --follow-tags` (push commit + tag, via PR to main)
-#   3. Draft a GitHub Release against the new `v*` tag and publish it
-#   4. This workflow runs on `release: published` and pushes to npm
-#      using OIDC trusted publishing (no NPM_TOKEN secret required).
+# Release flow:
+#   1. Open a PR bumping `version` in package.json (and package-lock.json).
+#   2. Merge to main (pr-gate must be green).
+#   3. auto-tag.yml creates v<version> tag + GitHub Release automatically.
+#   4. This workflow runs on `release: published`: gate matrix first, then npm
+#      publish via OIDC trusted publishing (no NPM_TOKEN secret).
 
 on:
   release:

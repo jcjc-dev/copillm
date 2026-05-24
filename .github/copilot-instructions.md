@@ -70,6 +70,8 @@ tests/
 .github/
   workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22
   workflows/release-gate.yml   # nightly cron + dispatch + invoked by publish.yml
+  workflows/auto-tag.yml       # tag + GitHub Release on package.json version bump
+  workflows/publish.yml        # release gate + npm publish (OIDC trusted publishing)
   rulesets/main.json           # blocks direct push to main + force-push + branch deletion
 ```
 
