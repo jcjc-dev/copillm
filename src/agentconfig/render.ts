@@ -264,8 +264,9 @@ export function renderClaude(input: ClaudeRenderInput): RenderResult {
 
 function renderClaudeNativeWrites(input: ClaudeRenderInput): FileWrite[] {
   const writes: FileWrite[] = [];
-  const userConfigPath = path.join(os.homedir(), ".claude.json");
-  const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+  const homeDir = userHomeDir();
+  const userConfigPath = path.join(homeDir, ".claude.json");
+  const settingsPath = path.join(homeDir, ".claude", "settings.json");
   const manifestPath = path.join(getCopillmHome(), "claude", "native-mcp-manifest.json");
 
   const serverNames = Object.keys(input.resolved.mcpServers);
@@ -313,6 +314,10 @@ function renderClaudeNativeWrites(input: ClaudeRenderInput): FileWrite[] {
   }
 
   return writes;
+}
+
+function userHomeDir(): string {
+  return process.env.HOME ?? os.homedir();
 }
 
 function readClaudeNativeManifest(filePath: string): string[] {
