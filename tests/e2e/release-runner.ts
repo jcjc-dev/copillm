@@ -50,11 +50,15 @@ async function main(): Promise<void> {
 
     await runScenario(failures, "real-codex-cli", async () => {
       const codexHome = await prepareCodexHome(seeded!.copillmHome, daemon!.baseUrl);
+      // Pass the prompt via stdin (Codex reads stdin when the prompt argument is `-`).
+      // This sidesteps Windows cmd.exe re-splitting multi-word argv when spawned through
+      // npx.cmd, which would otherwise cause `error: unexpected argument 'with' found`.
       const result = await runCommand(
-        ["npx", "-y", CODEX_PACKAGE, "exec", "--skip-git-repo-check", "--model", "gpt-test-codex", "Reply with the literal string ok-from-mock and nothing else."],
+        ["npx", "-y", CODEX_PACKAGE, "exec", "--skip-git-repo-check", "--model", "gpt-test-codex", "-"],
         {
           env: { ...process.env, CODEX_HOME: codexHome },
-          timeoutMs: 180_000
+          timeoutMs: 180_000,
+          stdin: "Reply with the literal string ok-from-mock and nothing else.\n"
         }
       );
       assertExitZero(result, "Real Codex CLI invocation");
@@ -124,15 +128,19 @@ async function prepareCodexHome(copillmHome: string, copillmBaseUrl: string): Pr
 
 async function runCommand(
   command: readonly string[],
-  options: { env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}
+  options: { env?: NodeJS.ProcessEnv; timeoutMs?: number; stdin?: string } = {}
 ): Promise<CommandResult> {
   return new Promise((resolve, reject) => {
     const [exe, ...args] = command;
+    const stdinMode = options.stdin !== undefined ? "pipe" : "ignore";
     const child = spawn(exe, args, {
       env: options.env ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [stdinMode, "pipe", "pipe"],
       shell: process.platform === "win32"
     });
+    if (options.stdin !== undefined) {
+      child.stdin?.end(options.stdin);
+    }
     let stdout = "";
     let stderr = "";
     child.stdout?.on("data", (chunk) => {
