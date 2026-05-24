@@ -64,6 +64,14 @@ function installHint(agent: AgentName): string {
       "    npm i -g @earendil-works/pi-coding-agent"
     ].join("\n");
   }
+  if (agent === "copilot") {
+    return [
+      "Hint: install GitHub Copilot CLI manually with one of:",
+      "    brew install --cask github-copilot-cli",
+      "    npm i -g @github/copilot",
+      "    https://github.com/github/copilot-cli"
+    ].join("\n");
+  }
   return [
     "Hint: install Claude Code manually with:",
     "    npm i -g @anthropic-ai/claude-code"
