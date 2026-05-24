@@ -21,8 +21,13 @@ permissions:
   id-token: write # REQUIRED for npm OIDC trusted publishing + provenance
 
 jobs:
+  gate:
+    name: Release gate
+    uses: ./.github/workflows/release-gate.yml
+
   publish:
     name: Build, test, and publish
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: npm-publish # optional: lets you require manual approval in repo settings

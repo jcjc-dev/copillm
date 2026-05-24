@@ -16,6 +16,18 @@ on:
         description: "@anthropic-ai/claude-code package spec (defaults to @latest)"
         required: false
         default: "@anthropic-ai/claude-code@latest"
+  workflow_call:
+    inputs:
+      codex_package:
+        description: "@openai/codex package spec (defaults to @latest)"
+        required: false
+        type: string
+        default: "@openai/codex@latest"
+      claude_package:
+        description: "@anthropic-ai/claude-code package spec (defaults to @latest)"
+        required: false
+        type: string
+        default: "@anthropic-ai/claude-code@latest"
 
 concurrency:
   group: release-gate-${{ github.workflow }}-${{ github.ref }}
@@ -59,5 +71,5 @@ jobs:
         run: npm run test:e2e:release
         env:
           CI: "true"
-          COPILLM_E2E_CODEX_PACKAGE: ${{ github.event.inputs.codex_package || '@openai/codex@latest' }}
-          COPILLM_E2E_CLAUDE_PACKAGE: ${{ github.event.inputs.claude_package || '@anthropic-ai/claude-code@latest' }}
+          COPILLM_E2E_CODEX_PACKAGE: ${{ inputs.codex_package || '@openai/codex@latest' }}
+          COPILLM_E2E_CLAUDE_PACKAGE: ${{ inputs.claude_package || '@anthropic-ai/claude-code@latest' }}
