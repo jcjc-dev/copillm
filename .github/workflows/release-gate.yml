@@ -1,8 +1,6 @@
 name: Release gate
 
 on:
-  release:
-    types: [published]
   schedule:
     # Nightly run at 09:00 UTC to catch upstream Codex / Claude Code regressions
     - cron: "0 9 * * *"

@@ -52,9 +52,9 @@ Two workflows, both running a `ubuntu-latest` × `macos-latest` × `windows-late
 | Workflow | Triggers | What it runs |
 |---|---|---|
 | **PR gate** (`pr-gate.yml`) | every PR + push to `main` + manual | lint + build + unit tests (`vitest`) + E2E PR-gate runner (mock backend + synthetic Codex/Claude clients hitting copillm with the real wire format and SSE shapes) |
-| **Release gate** (`release-gate.yml`) | on `release.published` + nightly cron at 09:00 UTC + manual | everything in PR gate + E2E release runner that installs the latest [`@openai/codex`](https://www.npmjs.com/package/@openai/codex) and [`@anthropic-ai/claude-code`](https://www.npmjs.com/package/@anthropic-ai/claude-code) via `npx -y` and drives them through the mock-backed copillm stack |
+| **Release gate** (`release-gate.yml`) | nightly cron at 09:00 UTC + manual + invoked by `publish.yml` on release | everything in PR gate + E2E release runner that installs the latest [`@openai/codex`](https://www.npmjs.com/package/@openai/codex) and [`@anthropic-ai/claude-code`](https://www.npmjs.com/package/@anthropic-ai/claude-code) via `npx -y` and drives them through the mock-backed copillm stack |
 
-The nightly schedule on the release gate gives daily signal on whether copillm still works against the latest published Codex/Claude Code releases — useful for catching upstream wire-format regressions without waiting for someone to cut a copillm release.
+The nightly schedule on the release gate gives daily signal on whether copillm still works against the latest published Codex/Claude Code releases — useful for catching upstream wire-format regressions without waiting for someone to cut a copillm release. On release, the gate runs as a prerequisite job inside `publish.yml` (via `workflow_call`), so `npm publish` only fires after the full matrix passes.
 
 The release-gate workflow accepts `workflow_dispatch` inputs to pin specific package versions:
 
