@@ -3,10 +3,10 @@ import fs from "node:fs";
 import { stringify as stringifyToml } from "smol-toml";
 import { AgentConfigError, type LoadResult } from "./load.js";
 import type { McpServerEntry, ResolvedProfile } from "./schema.js";
+import { getCopillmHome } from "../config/home.js";
 import {
   HASH_COMMENT,
   HTML_COMMENT,
-  backupIfMismatch,
   upsertManagedBlock
 } from "./markerBlock.js";
 
@@ -126,111 +126,59 @@ function isValidTomlIdent(name: string): boolean {
 
 // ─── Claude Code ──────────────────────────────────────────────────────────
 
-interface ClaudeMcpJsonShape {
-  mcpServers?: Record<string, unknown>;
-  _copillmManaged?: string[];
-  [key: string]: unknown;
-}
-
+/**
+ * copillm writes Claude's MCP config to ~/.copillm/claude/mcp.json (a
+ * copillm-owned location) and injects `--mcp-config <path>` into the launch
+ * argv. This is purely additive: Claude continues to read its own project
+ * (./.mcp.json) and user (~/.claude.json) scopes, and copillm never touches
+ * cwd. Instructions fan-out is not supported for Claude — put project
+ * guidance in your own CLAUDE.md and global guidance in ~/.claude/CLAUDE.md.
+ */
 export function renderClaude(input: RenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
+  const cliArgs: string[] = [];
 
-  // 1. .mcp.json (project scope) — preserve user entries.
-  const mcpJsonPath = path.join(input.cwd, ".mcp.json");
-  const claudeMcp = renderClaudeMcp(mcpJsonPath, input.resolved.mcpServers);
-  if (claudeMcp) {
-    writes.push({
-      path: mcpJsonPath,
-      content: claudeMcp,
-      mode: 0o600,
-      description: "Claude Code .mcp.json"
-    });
-  }
+  const claudeDir = path.join(getCopillmHome(), "claude");
+  const mcpJsonPath = path.join(claudeDir, "mcp.json");
 
-  // 2. CLAUDE.md instruction block.
-  if (input.resolved.instructions) {
-    const claudeMdPath = path.join(input.cwd, "CLAUDE.md");
-    const existing = fs.existsSync(claudeMdPath) ? fs.readFileSync(claudeMdPath, "utf8") : "";
-    const next = upsertManagedBlock(existing, input.resolved.instructions.body, HTML_COMMENT);
-    if (next !== existing) {
+  const serverCount = Object.keys(input.resolved.mcpServers).length;
+  if (serverCount > 0) {
+    const content = renderClaudeMcp(input.resolved.mcpServers);
+    const existing = fs.existsSync(mcpJsonPath) ? fs.readFileSync(mcpJsonPath, "utf8") : null;
+    if (existing !== content) {
       writes.push({
-        path: claudeMdPath,
-        content: next,
+        path: mcpJsonPath,
+        content,
         mode: 0o600,
-        description: "CLAUDE.md instructions block"
+        description: "Claude Code mcp.json (copillm-managed)"
       });
     }
+    cliArgs.push("--mcp-config", mcpJsonPath);
+  } else if (fs.existsSync(mcpJsonPath)) {
+    // Profile no longer declares any servers — clear the stale file so we
+    // don't keep referencing dead config on the next launch.
+    fs.rmSync(mcpJsonPath, { force: true });
+    notes.push(`Removed stale ${mcpJsonPath} (no MCP servers in active profile).`);
   }
 
-  return { writes, envOverlay: {}, cliArgs: [], notes };
+  if (input.resolved.instructions) {
+    notes.push(
+      "Claude: instructions fan-out is unsupported (Claude has no out-of-tree " +
+        "instructions hook). Move guidance to ~/.claude/CLAUDE.md or your " +
+        "project's CLAUDE.md manually."
+    );
+  }
+
+  return { writes, envOverlay: {}, cliArgs, notes };
 }
 
-function renderClaudeMcp(
-  mcpJsonPath: string,
-  servers: Record<string, McpServerEntry>
-): string | null {
-  let existing: ClaudeMcpJsonShape = {};
-  if (fs.existsSync(mcpJsonPath)) {
-    try {
-      existing = JSON.parse(fs.readFileSync(mcpJsonPath, "utf8")) as ClaudeMcpJsonShape;
-      if (typeof existing !== "object" || existing === null) {
-        throw new Error("not an object");
-      }
-    } catch (error) {
-      throw new AgentConfigError(
-        `Failed to parse ${mcpJsonPath}: ${(error as Error).message}. ` +
-          `Fix or remove the file and re-run.`
-      );
-    }
-  }
-
-  const managed = new Set(existing._copillmManaged ?? []);
-  const userOwned = new Set(Object.keys(existing.mcpServers ?? {}).filter((n) => !managed.has(n)));
-
-  // Detect conflicts: a copillm-managed name collides with a user-owned name.
-  const newNames = Object.keys(servers);
-  for (const name of newNames) {
-    if (userOwned.has(name)) {
-      throw new AgentConfigError(
-        `MCP server name "${name}" already exists in ${mcpJsonPath} and is owned by the user ` +
-          `(not previously managed by copillm). Rename one side, or move the user's entry ` +
-          `into agent.toml so copillm can manage it.`
-      );
-    }
-  }
-
-  // Strip previously-managed entries from the user's file before adding ours.
-  const nextServers: Record<string, unknown> = {};
-  for (const [name, value] of Object.entries(existing.mcpServers ?? {})) {
-    if (!managed.has(name)) nextServers[name] = value;
-  }
+function renderClaudeMcp(servers: Record<string, McpServerEntry>): string {
+  const out: Record<string, unknown> = {};
   for (const [name, server] of Object.entries(servers)) {
-    nextServers[name] = serverToClaudeShape(server);
+    out[name] = serverToClaudeShape(server);
   }
-
-  const nextFile: ClaudeMcpJsonShape = { ...existing };
-  if (Object.keys(nextServers).length > 0) {
-    nextFile.mcpServers = nextServers;
-  } else {
-    delete nextFile.mcpServers;
-  }
-  if (newNames.length > 0) {
-    nextFile._copillmManaged = newNames;
-  } else {
-    delete nextFile._copillmManaged;
-  }
-
-  const serialized = `${JSON.stringify(nextFile, null, 2)}\n`;
-  // Avoid pointless writes when state is unchanged.
-  if (fs.existsSync(mcpJsonPath) && fs.readFileSync(mcpJsonPath, "utf8") === serialized) {
-    return null;
-  }
-  // If we'd produce an empty file (no servers, no other keys), skip writing.
-  if (Object.keys(nextFile).length === 0 && !fs.existsSync(mcpJsonPath)) {
-    return null;
-  }
-  return serialized;
+  return `${JSON.stringify({ mcpServers: out }, null, 2)}\n`;
 }
 
 function serverToClaudeShape(server: McpServerEntry): Record<string, unknown> {
