@@ -71,15 +71,6 @@ headers = { Authorization = "Bearer ${GITHUB_TOKEN}" }
 scope = "user"
 ```
 
-### Unset (remove inherited server)
-
-To strip a server inherited from `[defaults]` or the global file in a specific profile:
-
-```toml
-[profiles.work.mcp.servers.playwright]
-inherit = "@unset"
-```
-
 ### Server name rules
 
 Names must match `^[A-Za-z0-9_-]+$` — letters, digits, dashes, underscores. Anything else is rejected at render time (TOML identifier requirement for the Codex output).
@@ -93,7 +84,11 @@ Names must match `^[A-Za-z0-9_-]+$` — letters, digits, dashes, underscores. An
 3. Project `[defaults]`
 4. Project `[profiles.<active>]`
 
-Later layers overwrite earlier ones. The `mcp.servers` map merges per-key: same-named entries fully replace; `inherit = "@unset"` removes.
+Later layers overwrite earlier ones. The `mcp.servers` map merges per-key: same-named entries fully replace.
+
+**`[defaults]` is always-on.** Anything declared under `[defaults.mcp.servers.*]` (in either the global or project file) applies to every profile. A profile cannot remove a default — it can only override one by re-declaring an entry with the same name. If you need a server to be present *only* in a single profile, declare it under that profile's section, not under defaults.
+
+`[profiles.default]` is just a profile that happens to be named `"default"` — it is **not** auto-merged into other profiles. Use `[defaults]` for that.
 
 ```toml
 active_profile = "work"
@@ -104,7 +99,7 @@ command = "npx"
 args = ["-y", "@playwright/mcp@latest"]
 
 [profiles.default]
-# inherits playwright from defaults
+# playwright is always on (from [defaults]) regardless of active profile
 
 [profiles.work.mcp.servers.ado]
 transport = "stdio"
@@ -112,7 +107,9 @@ command = "agency"
 args = ["mcp", "ado"]
 
 [profiles.work.mcp.servers.playwright]
-inherit = "@unset"   # work profile drops playwright
+# Same name as the default → this entry replaces it under the `work` profile.
+transport = "stdio"
+command = "/opt/custom/playwright-mcp"
 ```
 
 ### Switching profiles

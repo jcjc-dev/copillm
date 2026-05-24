@@ -4,13 +4,15 @@ import { z } from "zod";
  * Schema for `~/.copillm/agent.toml` (global) and `<cwd>/.copillm/agent.toml`
  * (project overlay). See plans/unified-booping-mango.md for design rationale.
  *
- * Sections under `[defaults.*]` apply to every profile; profiles override by
- * deep-merge. v1 only wires `instructions` and `mcp` into fan-out — the other
+ * Sections under `[defaults.*]` always apply, regardless of which profile is
+ * active. A profile may override a default by re-declaring an entry with the
+ * same key (e.g. `[profiles.work.mcp.servers.<name>]` replaces the same-named
+ * `[defaults.mcp.servers.<name>]`). There is no way to *remove* a default from
+ * a profile — defaults are intentionally always-on. v1 only wires
+ * `instructions` and `mcp` into fan-out — the other
  * sections (`skills`, `agents`, `hooks`, `permissions`) are reserved-but-
  * permissive so users can start populating them without future TOML breaking.
  */
-
-export const UNSET_SENTINEL = "@unset";
 
 const StringRecord = z.record(z.string());
 
@@ -34,13 +36,7 @@ const McpHttpSchema = z
   })
   .strict();
 
-const McpInheritUnset = z
-  .object({
-    inherit: z.literal(UNSET_SENTINEL)
-  })
-  .strict();
-
-export const McpServerSchema = z.union([McpStdioSchema, McpHttpSchema, McpInheritUnset]);
+export const McpServerSchema = z.union([McpStdioSchema, McpHttpSchema]);
 export type McpServerEntry = z.infer<typeof McpStdioSchema> | z.infer<typeof McpHttpSchema>;
 export type McpServerRaw = z.infer<typeof McpServerSchema>;
 

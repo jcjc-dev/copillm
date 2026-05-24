@@ -8,8 +8,7 @@ import {
   type AgentToml,
   type McpServerEntry,
   type ResolvedProfile,
-  type Section,
-  UNSET_SENTINEL
+  type Section
 } from "./schema.js";
 
 export interface LoadOptions {
@@ -141,17 +140,14 @@ function mergeAndResolve(input: {
       ? { body: instructionsBody }
       : null;
 
-  // Merge mcp.servers map; later layers replace earlier same-named entries;
-  // `inherit = "@unset"` removes an inherited entry.
+  // Merge mcp.servers map; later layers replace earlier same-named entries.
+  // Defaults are always-on: a profile may override a default by name but
+  // cannot remove it.
   const servers: Record<string, McpServerEntry> = {};
   for (const layer of layers) {
     const layerServers = layer.mcp?.servers ?? {};
     for (const [name, value] of Object.entries(layerServers)) {
-      if ("inherit" in value && value.inherit === UNSET_SENTINEL) {
-        delete servers[name];
-        continue;
-      }
-      servers[name] = expandEnv(value as McpServerEntry);
+      servers[name] = expandEnv(value);
     }
   }
 
