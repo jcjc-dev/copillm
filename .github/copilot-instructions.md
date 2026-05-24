@@ -105,6 +105,25 @@ tests/
 - **PR titles** match commit subjects when there's one logical change. Use prefixes: `feat:`, `fix:`, `docs:`, `chore:`, `test:`, `refactor:`.
 - **Squash-merge** is the default. Branches auto-delete after merge.
 
+## Cutting a release
+
+The release pipeline is fully automated by `.github/workflows/release.yml`. **Do not** run `npm version`, `git tag`, `gh release create`, or `npm publish` locally — `release.yml` does all of that.
+
+To ship a new version:
+
+1. Branch off `main` and bump `version` in both `package.json` and `package-lock.json` (keep them in sync — both the top-level `version` and the `packages[""].version` inside `package-lock.json`). Follow semver: patch for fixes, minor for backward-compatible features, major for breaking changes.
+2. Optionally include the user-facing changes in the same PR, or land them separately first. If the version bump is its own PR, give it a `chore(release): vX.Y.Z` title.
+3. Open the PR, wait for `pr-gate` to go green across all 6 matrix cells, get it merged to `main`.
+4. On merge, `release.yml` fires automatically because `package.json` changed. It runs **detect → tag → upstream-e2e gate → npm publish → GitHub Release** linearly. Watch the workflow run; if any step fails, the npm push is skipped and you can investigate without a broken artifact landing on the registry.
+5. Verify `npm view copillm@<version>` returns the new version and the GitHub Release exists with auto-generated notes.
+
+Notes:
+
+- The `detect` job is idempotent — if the tag already exists (because `release.yml` already ran for this version), downstream jobs skip. Safe to re-run via `workflow_dispatch` for retries.
+- The gate (`upstream-e2e.yml`) installs the **real** `@openai/codex` and `@anthropic-ai/claude-code` packages and drives them through copillm. A failure here usually means either (a) a Windows arg-quoting / shell-escaping issue in the e2e harness, or (b) an actual upstream regression — investigate before bumping again.
+- If `release.yml` fails after the tag is pushed but before npm publishes, you cannot simply re-run for the same version; either bump again or manually delete the tag + dispatch.
+- Never publish to npm by hand. The repo relies on npm OIDC trusted publishing with provenance via the `npm-publish` GitHub Environment — local `npm publish` would bypass both the gate and the provenance attestation.
+
 ## Things to avoid
 
 - Adding a third-party HTTP client — use Node's built-in `fetch`.
