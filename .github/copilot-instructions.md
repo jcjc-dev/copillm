@@ -69,9 +69,8 @@ tests/
     clients/                   # codexLikeClient.ts, claudeLikeClient.ts
 .github/
   workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22
-  workflows/release-gate.yml   # nightly cron + dispatch + invoked by publish.yml
-  workflows/auto-tag.yml       # tag + GitHub Release on package.json version bump
-  workflows/publish.yml        # release gate + npm publish (OIDC trusted publishing)
+  workflows/upstream-e2e.yml   # nightly cron + dispatch + invoked by release.yml as the publish gate
+  workflows/release.yml        # version-bump triggered: detect → tag → gate → npm publish → GitHub Release
   rulesets/main.json           # blocks direct push to main + force-push + branch deletion
 ```
 

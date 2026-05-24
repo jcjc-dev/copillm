@@ -1,7 +1,7 @@
 # copillm
 
 [![PR gate](https://github.com/jcjc-dev/copillm/actions/workflows/pr-gate.yml/badge.svg?branch=main)](https://github.com/jcjc-dev/copillm/actions/workflows/pr-gate.yml)
-[![Release gate](https://github.com/jcjc-dev/copillm/actions/workflows/release-gate.yml/badge.svg?branch=main&event=schedule)](https://github.com/jcjc-dev/copillm/actions/workflows/release-gate.yml)
+[![Upstream e2e (nightly)](https://github.com/jcjc-dev/copillm/actions/workflows/upstream-e2e.yml/badge.svg?branch=main&event=schedule)](https://github.com/jcjc-dev/copillm/actions/workflows/upstream-e2e.yml)
 [![npm version](https://img.shields.io/npm/v/copillm.svg)](https://www.npmjs.com/package/copillm)
 [![Node.js version](https://img.shields.io/node/v/copillm.svg)](https://www.npmjs.com/package/copillm)
 
