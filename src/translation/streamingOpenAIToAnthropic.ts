@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { Readable, Writable } from "node:stream";
 
+import { isBenignSocketError } from "../server/requestLifecycle.js";
+
 interface OpenAIStreamChunk {
   id?: string;
   model?: string;
@@ -56,12 +58,38 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
   let nextAnthropicIndex = 0;
   let streamErrored = false;
   let pingTimer: NodeJS.Timeout | null = null;
+  let downstreamGone = false;
+
+  function isDownstreamAlive(): boolean {
+    if (downstreamGone) return false;
+    return downstream.writable && !downstream.writableEnded && !downstream.destroyed;
+  }
+
+  function markDownstreamGone(): void {
+    if (downstreamGone) return;
+    downstreamGone = true;
+    stopPings();
+    // Best-effort: also stop reading upstream so we don't pull a megabyte
+    // of SSE we'll never deliver.
+    try {
+      upstream.destroy();
+    } catch {
+      // ignore
+    }
+  }
+
+  downstream.on("close", markDownstreamGone);
+  downstream.on("error", markDownstreamGone);
 
   function startPings(): void {
     if (pingTimer !== null) {
       return;
     }
     pingTimer = setInterval(() => {
+      if (!isDownstreamAlive()) {
+        stopPings();
+        return;
+      }
       writeEvent("ping", { type: "ping" });
     }, PING_INTERVAL_MS);
     if (typeof pingTimer.unref === "function") {
@@ -77,7 +105,19 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
   }
 
   function writeEvent(eventName: string, data: unknown): void {
-    downstream.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (!isDownstreamAlive()) {
+      markDownstreamGone();
+      return;
+    }
+    try {
+      downstream.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+    } catch (error) {
+      if (isBenignSocketError(error)) {
+        markDownstreamGone();
+        return;
+      }
+      throw error;
+    }
   }
 
   function emitMessageStart(): void {
@@ -252,6 +292,10 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
 
   try {
     for await (const chunk of upstream) {
+      if (!isDownstreamAlive()) {
+        markDownstreamGone();
+        return;
+      }
       const text = typeof chunk === "string" ? chunk : Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
       buffer += text;
       let newlineIndex: number;
@@ -266,8 +310,15 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
       buffer = "";
     }
   } catch (error) {
-    streamErrored = true;
     stopPings();
+    if (!isDownstreamAlive() || isBenignSocketError(error)) {
+      // Either we destroyed the upstream because downstream went away, or
+      // the upstream rejected with a benign socket error. Either way, no
+      // recovery write is possible — just stop.
+      markDownstreamGone();
+      return;
+    }
+    streamErrored = true;
     emitMessageStart();
     closeAllBlocks();
     writeEvent("message_delta", {
@@ -280,7 +331,7 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
       error: { type: "api_error", message: error instanceof Error ? error.message : "upstream stream error" }
     });
     writeEvent("message_stop", { type: "message_stop" });
-    downstream.end();
+    safeEndDownstream();
     return;
   }
 
@@ -289,6 +340,9 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
   }
 
   stopPings();
+  if (!isDownstreamAlive()) {
+    return;
+  }
   emitMessageStart();
   closeAllBlocks();
   writeEvent("message_delta", {
@@ -297,7 +351,16 @@ export async function translateOpenAIStreamToAnthropic(options: StreamTranslator
     usage: { input_tokens: inputTokens, output_tokens: outputTokens, cache_read_input_tokens: cacheReadTokens }
   });
   writeEvent("message_stop", { type: "message_stop" });
-  downstream.end();
+  safeEndDownstream();
+
+  function safeEndDownstream(): void {
+    if (downstream.writableEnded || downstream.destroyed) return;
+    try {
+      downstream.end();
+    } catch (error) {
+      if (!isBenignSocketError(error)) throw error;
+    }
+  }
 }
 
 export interface AnthropicStreamPrelude {
@@ -329,8 +392,12 @@ export function writeAnthropicPrelude(downstream: Writable, model: string): Anth
       usage: { input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 0 }
     }
   };
-  downstream.write(`event: message_start\ndata: ${JSON.stringify(messageStart)}\n\n`);
-  downstream.write(`event: ping\ndata: ${JSON.stringify({ type: "ping" })}\n\n`);
+  try {
+    downstream.write(`event: message_start\ndata: ${JSON.stringify(messageStart)}\n\n`);
+    downstream.write(`event: ping\ndata: ${JSON.stringify({ type: "ping" })}\n\n`);
+  } catch (error) {
+    if (!isBenignSocketError(error)) throw error;
+  }
   return { messageId };
 }
 

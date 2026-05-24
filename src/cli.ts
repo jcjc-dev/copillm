@@ -39,6 +39,7 @@ import { launchAgent } from "./cli/launchAgent.js";
 import type { AgentName } from "./cli/resolveAgent.js";
 import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
 import { registerConfigCommands } from "./cli/configCommands.js";
+import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
 
 const logger = createLogger();
 const program = new Command();
@@ -980,6 +981,8 @@ async function runDaemon(options?: { debug?: boolean }): Promise<
     tokenManager.clear();
     throw new Error(`No available port in configured range (${ports[0]}-${ports[ports.length - 1]}).`);
   }
+
+  installProcessSafetyNet(logger);
 
   let shuttingDown = false;
   const shutdown = async () => {
