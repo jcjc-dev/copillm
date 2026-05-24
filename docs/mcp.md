@@ -25,7 +25,7 @@ If neither file exists, copillm skips fan-out entirely — your agents launch un
 copillm config init       # scaffold ~/.copillm/agent.toml
 $EDITOR ~/.copillm/agent.toml
 copillm config show       # preview the resolved active profile
-copillm config sync --agent claude   # render Claude's mcp.json without launching
+copillm config sync --agent claude   # write Claude's native config without launching
 copillm claude            # launch, fan-out runs automatically
 ```
 
@@ -142,18 +142,19 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ## How fan-out works per agent
 
-`copillm <agent>` (or `copillm config sync --agent <agent>`) renders the resolved profile into each agent's native format.
+`copillm <agent>` renders the resolved profile for a wrapped launch. `copillm config sync --agent <agent>` writes the resolved profile into the agent's native/default config paths so the agent can be launched directly.
 
 ### Claude Code
 
-- Writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` — **never** touches `<cwd>` or your user-scope `~/.claude.json`.
-- On launch, copillm appends `--mcp-config ~/.copillm/claude/mcp.json` to the `claude` argv. This is purely additive: Claude continues to load any project-scope `./.mcp.json` and user-scope entries you maintain yourself.
+- `copillm claude` writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` and appends `--mcp-config` for that launch.
+- `copillm config sync --agent claude` writes MCP servers into user scope at `~/.claude.json` and writes copillm's provider env into `~/.claude/settings.json`.
 - When the active profile declares no MCP servers, the managed file is removed and no `--mcp-config` flag is added.
 - Instructions fan-out is **not supported** for Claude. Place project guidance in your own `CLAUDE.md` or global guidance in `~/.claude/CLAUDE.md`.
 
 ### Codex CLI
 
-- Injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml`.
+- `copillm codex` injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml` for the wrapped launch.
+- `copillm config sync --agent codex` merges copillm's provider block into `~/.codex/config.toml` and injects the `[mcp_servers]` block there.
 - The block is delimited with hash-comment markers so subsequent runs replace just the managed section.
 - Requires `copillm start` (or any prior launch) to have generated the base `config.toml` first.
 
@@ -186,7 +187,7 @@ Prefer ripgrep over find.
 | `copillm config show [--profile <name>]` | Print the resolved, env-expanded profile |
 | `copillm config profile list` | List profiles (active marked with `*`) |
 | `copillm config profile use <name>` | Set `active_profile` in global file |
-| `copillm config sync --agent <kind> [--profile <name>]` | Fan-out without launching the agent. `<kind>` ∈ `codex \| claude \| pi \| copilot` |
+| `copillm config sync --agent <kind> [--profile <name>]` | Sync to native/default agent paths without launching. `<kind>` ∈ `codex \| claude \| pi \| copilot` |
 
 ## Troubleshooting
 

@@ -1,12 +1,15 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { getCopillmHome } from "../config/home.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
+import { loadConfig } from "../config/config.js";
 import { AgentConfigError, loadAgentConfig } from "../agentconfig/load.js";
 import { applyAgentConfig, formatApplyNotes } from "../agentconfig/apply.js";
 import type { AgentKind } from "../agentconfig/render.js";
+import { buildClaudeEnvBundle } from "./agentEnv.js";
 
 const SCAFFOLD_TOML = `# copillm agent config — one source of truth for instructions and MCP servers
 # fanned out to each coding agent on \`copillm <agent>\` launch.
@@ -124,7 +127,7 @@ export function registerConfigCommands(program: Command): void {
 
   config
     .command("sync")
-    .description("Run fan-out without launching an agent (debug aid)")
+    .description("Sync resolved config to the agent's native paths without launching")
     .requiredOption("--agent <kind>", "codex | claude | pi | copilot")
     .option("--profile <name>", "Override active profile for this run")
     .action((opts: { agent: string; profile?: string }) => {
@@ -134,11 +137,23 @@ export function registerConfigCommands(program: Command): void {
         process.exit(1);
       }
       try {
+        const claudeEnv =
+          agent === "claude"
+            ? buildClaudeEnvBundle({
+                port: loadConfig().preferredPort,
+                callerSecret: null,
+                enableGatewayDiscovery: true
+              }).env
+            : undefined;
         const result = applyAgentConfig({
           agent,
           cwd: process.cwd(),
           profileOverride: opts.profile ?? null,
-          codexHomeDir: agent === "codex" ? path.join(getCopillmHome(), "codex") : undefined
+          codexHomeDir: agent === "codex" ? path.join(os.homedir(), ".codex") : undefined,
+          codexBaseConfigSourcePath:
+            agent === "codex" ? path.join(getCopillmHome(), "codex", "config.toml") : undefined,
+          claudeNativeSync: agent === "claude",
+          claudeEnv
         });
         for (const line of formatApplyNotes(result, agent)) {
           process.stdout.write(`${line}\n`);

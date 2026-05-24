@@ -31,13 +31,21 @@ export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY="1"
 
 Paste it into a shell, or `eval "$(copillm env claude)"` to load it into the current shell, then run `claude`. Use `copillm env claude --inline` for the legacy single-line form. `--shell fish` and `--shell powershell` are also supported.
 
+To persist the same provider wiring into Claude Code's native settings without launching through copillm, run:
+
+```bash
+copillm config sync --agent claude
+```
+
+That writes the provider environment into `~/.claude/settings.json` and syncs the active profile's MCP servers into user scope in `~/.claude.json`.
+
 ### What each piece does
 
 - `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` — point Claude Code at the local copillm proxy
 - `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` — Claude Code resolves the `opus`/`sonnet`/`haiku` aliases (used by `/model` selections, `claude --model opus`, and background haiku-class tasks) to these specific Copilot variants client-side
 - `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` — Claude Code v2.1.129+ calls our `/anthropic/v1/models` endpoint at startup and populates the `/model` picker with every claude-prefixed Copilot variant. Each appears labelled "From gateway"
 
-Override any env var in your shell (e.g. `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7-high`) to pick a different Copilot variant. copillm doesn't touch `~/.claude/settings.json` or persist any Anthropic preferences.
+Override any env var in your shell (e.g. `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7-high`) to pick a different Copilot variant. The `copillm claude` launcher does not persist Anthropic preferences; only `copillm config sync --agent claude` writes native Claude settings.
 
 ## Context windows and the `[1m]` alias
 

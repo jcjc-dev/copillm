@@ -93,6 +93,56 @@ headers = { Authorization = "Bearer abc", X-Trace = "1" }
     });
   });
 
+  it("can merge the copillm provider into the native Codex config", () => {
+    fs.writeFileSync(
+      path.join(tmpHome, "agent.toml"),
+      `
+[defaults.mcp.servers.echo]
+transport = "stdio"
+command = "echo"
+
+[profiles.default]
+`
+    );
+
+    const nativeCodexHome = path.join(tmpHome, ".codex");
+    fs.mkdirSync(nativeCodexHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(nativeCodexHome, "config.toml"),
+      [
+        "[desktop]",
+        'conversationDetailMode = "STEPS_COMMANDS"',
+        "",
+        "[features]",
+        "js_repl = false",
+        ""
+      ].join("\n")
+    );
+
+    applyAgentConfig({
+      agent: "codex",
+      cwd: tmpCwd,
+      codexHomeDir: nativeCodexHome,
+      codexBaseConfigSourcePath: path.join(tmpHome, "codex", "config.toml")
+    });
+
+    const written = fs.readFileSync(path.join(nativeCodexHome, "config.toml"), "utf8");
+    const parsed = parseToml(written) as {
+      model?: string;
+      model_provider?: string;
+      model_providers?: Record<string, Record<string, unknown>>;
+      desktop?: Record<string, unknown>;
+      mcp_servers?: Record<string, Record<string, unknown>>;
+    };
+
+    expect(parsed.model).toBe("claude-sonnet-4.6");
+    expect(parsed.model_provider).toBe("copillm");
+    expect(parsed.model_providers?.copillm.base_url).toBe("http://127.0.0.1:5050/codex/v1");
+    expect(parsed.model_providers?.copillm.requires_openai_auth).toBe(false);
+    expect(parsed.desktop?.conversationDetailMode).toBe("STEPS_COMMANDS");
+    expect(parsed.mcp_servers?.echo.command).toBe("echo");
+  });
+
   it("is idempotent on re-run with the same input", () => {
     fs.writeFileSync(
       path.join(tmpHome, "agent.toml"),
