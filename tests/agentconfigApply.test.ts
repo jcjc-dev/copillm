@@ -114,6 +114,51 @@ body = "Be terse."
     applyAgentConfig({ agent: "claude", cwd: tmpCwd });
     expect(fs.existsSync(path.join(tmpCwd, "CLAUDE.md"))).toBe(false);
   });
+
+  it("writes native Claude settings and user MCP config for explicit sync", () => {
+    writeGlobal(`
+[defaults.mcp.servers.copillm-github]
+transport = "http"
+url = "https://example.com/mcp"
+headers = { Authorization = "Bearer abc" }
+[profiles.default]
+`);
+    fs.writeFileSync(
+      path.join(tmpHome, ".claude.json"),
+      JSON.stringify({ mcpServers: { "user-owned": { type: "stdio", command: "true" } } })
+    );
+    fs.mkdirSync(path.join(tmpHome, ".claude"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, ".claude", "settings.json"),
+      JSON.stringify({ env: { EXISTING: "1" }, theme: "dark" })
+    );
+
+    const result = applyAgentConfig({
+      agent: "claude",
+      cwd: tmpCwd,
+      claudeNativeSync: true,
+      claudeEnv: {
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:4141/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "copillm-local"
+      }
+    });
+
+    expect(result.cliArgs).toEqual([]);
+
+    const userConfig = JSON.parse(fs.readFileSync(path.join(tmpHome, ".claude.json"), "utf8"));
+    expect(userConfig.mcpServers["user-owned"]).toBeDefined();
+    expect(userConfig.mcpServers["copillm-github"]).toEqual({
+      type: "http",
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer abc" }
+    });
+
+    const settings = JSON.parse(fs.readFileSync(path.join(tmpHome, ".claude", "settings.json"), "utf8"));
+    expect(settings.theme).toBe("dark");
+    expect(settings.env.EXISTING).toBe("1");
+    expect(settings.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:4141/anthropic");
+    expect(settings.env.ANTHROPIC_AUTH_TOKEN).toBe("copillm-local");
+  });
 });
 
 describe("applyAgentConfig — pi", () => {
