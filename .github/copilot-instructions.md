@@ -69,7 +69,7 @@ tests/
     clients/                   # codexLikeClient.ts, claudeLikeClient.ts
 .github/
   workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22
-  workflows/release-gate.yml   # release publish + nightly cron + dispatch
+  workflows/release-gate.yml   # nightly cron + dispatch + invoked by publish.yml
   rulesets/main.json           # blocks direct push to main + force-push + branch deletion
 ```
 
