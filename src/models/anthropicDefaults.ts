@@ -12,6 +12,7 @@ const SUFFIX_BLOCKLIST = [
   "-low",
   "-min",
   "-1m",
+  "[1m]",
   "-internal",
   "-preview",
   "-beta",
