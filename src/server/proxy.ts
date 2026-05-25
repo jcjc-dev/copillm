@@ -778,12 +778,7 @@ async function handleDebug(
       user = {
         login: summary.login,
         id: summary.id,
-        name: summary.name,
-        email: summary.email,
-        type: summary.type,
-        avatar_url: summary.avatar_url,
-        html_url: summary.html_url,
-        plan_name: summary.plan_name
+        type: summary.type
       };
     } catch (error) {
       if (error instanceof GithubUserFetchError) {
