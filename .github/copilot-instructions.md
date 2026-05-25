@@ -111,7 +111,7 @@ The release pipeline is fully automated by `.github/workflows/release.yml`. **Do
 
 To ship a new version:
 
-1. Branch off `main` and bump `version` in both `package.json` and `package-lock.json` (keep them in sync — both the top-level `version` and the `packages[""].version` inside `package-lock.json`). Follow semver: patch for fixes, minor for backward-compatible features, major for breaking changes.
+1. Branch off `main` and bump `version` in both `package.json` and `package-lock.json` (keep them in sync — both the top-level `version` and the `packages[""].version` inside `package-lock.json`). **Default to a patch bump.** Unless the user explicitly directs otherwise, every release is a patch — minor/major bumps are reserved for significant behavior changes, repo restructures, or new/breaking functionality, and should be confirmed with the user before bumping. Standard semver still applies inside that policy: patch for fixes, minor for backward-compatible features, major for breaking changes.
 2. Optionally include the user-facing changes in the same PR, or land them separately first. If the version bump is its own PR, give it a `chore(release): vX.Y.Z` title.
 3. Open the PR, wait for `pr-gate` to go green across all 6 matrix cells, get it merged to `main`.
 4. On merge, `release.yml` fires automatically because `package.json` changed. It runs **detect → tag → upstream-e2e gate → npm publish → GitHub Release** linearly. Watch the workflow run; if any step fails, the npm push is skipped and you can investigate without a broken artifact landing on the registry.
@@ -123,6 +123,18 @@ Notes:
 - The gate (`upstream-e2e.yml`) installs the **real** `@openai/codex` and `@anthropic-ai/claude-code` packages and drives them through copillm. A failure here usually means either (a) a Windows arg-quoting / shell-escaping issue in the e2e harness, or (b) an actual upstream regression — investigate before bumping again.
 - If `release.yml` fails after the tag is pushed but before npm publishes, you cannot simply re-run for the same version; either bump again or manually delete the tag + dispatch.
 - Never publish to npm by hand. The repo relies on npm OIDC trusted publishing with provenance via the `npm-publish` GitHub Environment — local `npm publish` would bypass both the gate and the provenance attestation.
+
+## Debug / identifying issues
+
+When investigating a misbehaving request or daemon, prefer the built-in debug surface before adding new instrumentation.
+
+- **Global `--debug` flag.** `copillm --debug <subcommand>` (e.g. `copillm --debug start`, `copillm --debug claude`) enables daemon debug mode for that invocation: it turns on `/_debug`, sets the daemon log level to `debug`, and (for detached daemons) writes structured JSON logs to a debug log file. Per-command `--debug` / `--copillm-debug` flags are retained as compatibility aliases — keep `--copillm-debug` on launchers so child-agent `--debug` flags pass through cleanly.
+- **Debug log file.** Detached debug daemons write to `~/.copillm/debug.log` by default; override with `COPILLM_LOG_FILE`. The file is created with `0600` perms. Foreground daemons write to stderr (see below).
+- **Daemon logs go to stderr, not stdout.** Command stdout stays clean for `--json` consumers and banners; structured pino logs flow to fd 2 (or to `COPILLM_LOG_FILE` when set). Don't reintroduce `console.log` in daemon code paths.
+- **`/_debug` endpoint.** Only mounted when debug mode is on. Returns `server.{port,pid,uptime_seconds,log_level,log_file,...}`, `auth.{bearer_ttl_seconds,bearer_present,...}`, the GitHub user summary, and the route list. The bearer token is never included. Add new diagnostic fields here rather than logging them ad-hoc.
+- **Upstream error forwarding is part of the default contract, not a debug-mode feature.** When upstream returns non-2xx, the proxy forwards a structured payload to the client: Anthropic routes get `{ type: "error", error: { type, code, message, upstream_status_code, request_id } }`; OpenAI-shape routes get the same fields under `error`. **The HTTP status returned to the client mirrors `upstream.status`** (e.g. upstream 429 → client 429). Don't collapse this back to a generic 400/500.
+- **Useful log events.** `event=http_request` (info), `event=upstream_non_ok` (warn, carries `upstream_error_code` + `upstream_error_message`), `event=upstream_retry` (warn), `event=request_prepared` and `event=upstream_request` / `event=upstream_response` (debug only). When adding new diagnostics that are noisy or expose request shape, gate them on `logger.debug` so they only appear under `--debug`.
+- **Probing manually.** `copillm --debug start --detach` then `curl http://127.0.0.1:<port>/_debug | jq` is the canonical first step. `copillm status --json` is fine for liveness but does not require debug mode.
 
 ## Things to avoid
 
