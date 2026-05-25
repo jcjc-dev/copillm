@@ -10,7 +10,7 @@ nav_order: 3
 Launch Codex CLI, fully wired against the local copillm daemon.
 
 ```bash
-copillm codex [args...]
+copillm [--debug] codex [args...]
 ```
 
 Any arguments after `codex` are forwarded verbatim to the underlying Codex CLI.
@@ -18,6 +18,13 @@ Any arguments after `codex` are forwarded verbatim to the underlying Codex CLI.
 ```bash
 copillm codex --model gpt-5
 copillm codex --help
+```
+
+Use the global debug flag to debug copillm itself without stealing flags from Codex:
+
+```bash
+copillm --debug codex
+copillm --debug codex -- --debug  # also forwards --debug to Codex
 ```
 
 ## What it does
@@ -44,3 +51,4 @@ For details on Codex-specific configuration, see [Using with Codex CLI](../../co
 | `COPILLM_CODEX_VERSION` | Pin a specific Codex CLI version. |
 | `CODEX_HOME` | Override the directory used for Codex configuration. |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
+| `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |

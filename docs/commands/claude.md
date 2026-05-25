@@ -10,7 +10,7 @@ nav_order: 2
 Launch Claude Code, fully wired against the local copillm daemon.
 
 ```bash
-copillm claude [args...]
+copillm [--debug] claude [args...]
 ```
 
 Any arguments after `claude` are forwarded verbatim to the underlying Claude Code CLI.
@@ -18,6 +18,13 @@ Any arguments after `claude` are forwarded verbatim to the underlying Claude Cod
 ```bash
 copillm claude --model opus
 copillm claude --help
+```
+
+Use the global debug flag to debug copillm itself without stealing flags from Claude Code:
+
+```bash
+copillm --debug claude
+copillm --debug claude -- --debug  # also forwards --debug to Claude Code
 ```
 
 ## What it does
@@ -43,3 +50,4 @@ For details on Claude-specific environment wiring and the `[1m]` 1M-context mode
 | --- | --- |
 | `COPILLM_CLAUDE_VERSION` | Pin a specific Claude Code version. |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
+| `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |
