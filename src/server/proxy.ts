@@ -202,6 +202,7 @@ export async function startProxyServer(input: {
         }
         await handleDebug(res, {
           config: input.config,
+          logger: input.logger,
           tokenManager: input.tokenManager,
           githubToken: input.githubToken,
           port: input.port
@@ -248,6 +249,20 @@ export async function startProxyServer(input: {
         beginAnthropicSseResponse(res, req);
         prelude = writeAnthropicPrelude(res, requestedModel ?? "");
       }
+      input.logger.debug(
+        {
+          event: "request_prepared",
+          request_id: requestId,
+          route: route.kind,
+          anthro_shape: route.anthroShape,
+          requested_model: requestedModel,
+          upstream_model: readRequestedModel(upstreamBody),
+          model_resolution_rule: resolvedModel?.rule ?? null,
+          upstream_path: upstreamPath,
+          ...summarizeUpstreamPayload(upstreamBody)
+        },
+        "prepared upstream request"
+      );
       try {
         const upstream = await postToCopilot({
           tokenManager: input.tokenManager,
@@ -368,6 +383,17 @@ async function postToCopilot(input: {
       throw abortErrorFromSignal(input.signal);
     }
     try {
+      const attemptStartedAt = Date.now();
+      input.logger.debug(
+        {
+          event: "upstream_request",
+          request_id: input.requestId,
+          attempt,
+          upstream_path: input.upstreamPath,
+          force_refresh: forceRefresh
+        },
+        "posting upstream request"
+      );
       const response = await postWithCurrentBearer(
         input.tokenManager,
         input.accountType,
@@ -376,6 +402,19 @@ async function postToCopilot(input: {
         input.requestId,
         input.upstreamPath,
         input.signal
+      );
+      input.logger.debug(
+        {
+          event: "upstream_response",
+          request_id: input.requestId,
+          attempt,
+          upstream_path: input.upstreamPath,
+          status_code: response.status,
+          duration_ms: Date.now() - attemptStartedAt,
+          content_type: response.headers.get("content-type"),
+          retry_after: response.headers.get("retry-after")
+        },
+        "received upstream response"
       );
       forceRefresh = false;
 
@@ -722,6 +761,7 @@ async function handleDebug(
   res: ServerResponse,
   input: {
     config: AppConfig;
+    logger: Logger;
     tokenManager: CopilotTokenManager;
     githubToken?: string;
     port: number;
@@ -765,7 +805,9 @@ async function handleDebug(
       uptime_seconds: uptimeSeconds,
       account_type: input.config.accountType,
       selected_models: input.config.selectedModels,
-      require_caller_secret: input.config.requireCallerSecret
+      require_caller_secret: input.config.requireCallerSecret,
+      log_level: input.logger.level,
+      log_file: process.env.COPILLM_LOG_FILE ?? null
     },
     auth: {
       bearer_ttl_seconds: bearerTtlSeconds,
@@ -1018,6 +1060,55 @@ function readTruncatedStringField(record: Record<string, unknown>, key: string):
 function truncateForDiagnostics(value: string): string {
   const maxChars = 500;
   return value.length > maxChars ? `${value.slice(0, maxChars)}...` : value;
+}
+
+function summarizeUpstreamPayload(payload: unknown): Record<string, unknown> {
+  let requestBytes: number | null = null;
+  try {
+    requestBytes = Buffer.byteLength(JSON.stringify(payload), "utf8");
+  } catch {
+    requestBytes = null;
+  }
+
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { upstream_request_bytes: requestBytes };
+  }
+
+  const record = payload as Record<string, unknown>;
+  const messages = Array.isArray(record.messages) ? record.messages : null;
+  const input = Array.isArray(record.input) ? record.input : null;
+  return {
+    upstream_request_bytes: requestBytes,
+    stream: record.stream === true,
+    max_tokens: typeof record.max_tokens === "number" ? record.max_tokens : null,
+    message_count: messages?.length ?? null,
+    input_item_count: input?.length ?? null,
+    tool_count: Array.isArray(record.tools) ? record.tools.length : 0,
+    text_characters: sumTextCharacters(payload)
+  };
+}
+
+function sumTextCharacters(value: unknown): number {
+  if (typeof value === "string") {
+    return value.length;
+  }
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+  if (Array.isArray(value)) {
+    return value.reduce((total, item) => total + sumTextCharacters(item), 0);
+  }
+
+  let total = 0;
+  const record = value as Record<string, unknown>;
+  for (const [key, nested] of Object.entries(record)) {
+    if (key === "text" || key === "content" || key === "arguments" || key === "input") {
+      total += sumTextCharacters(nested);
+    } else if (nested && typeof nested === "object" && key !== "data" && key !== "image_url" && key !== "source") {
+      total += sumTextCharacters(nested);
+    }
+  }
+  return total;
 }
 
 function healthFailure(error: unknown): { httpStatus: number; payload: Record<string, unknown> } {

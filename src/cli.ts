@@ -23,7 +23,7 @@ import {
   generatePiHome,
   type PiInitResult
 } from "./pi/init.js";
-import { getCopillmHome } from "./config/home.js";
+import { debugLogPath, getCopillmHome } from "./config/home.js";
 import { clearClaudeGatewayCache } from "./claude/cache.js";
 import { detectClaudeSettingsConflicts, formatSettingsConflictWarning } from "./claude/settingsConflict.js";
 import {
@@ -46,6 +46,7 @@ const program = new Command();
 
 program.name("copillm").description("Local Copilot proxy").version("0.1.0");
 program.enablePositionalOptions();
+program.option("--debug", "Enable copillm debug mode (debug endpoint plus verbose daemon diagnostics)");
 
 program
   .command("login")
@@ -155,6 +156,8 @@ program
   .option("--no-pi", "Skip generating ~/.pi/agent/models.json for pi coding agent")
   .option("--json", "JSON output")
   .action(async (opts: { detach?: boolean; debug?: boolean; codex?: boolean; codexModel?: string; pi?: boolean; json?: boolean }) => {
+    const debug = resolveCopillmDebug(opts.debug);
+    enableRuntimeDebug(debug);
     if (opts.detach) {
       // Fail fast on missing credentials rather than letting the detached
       // child die silently and surface as a generic "start timed out" error.
@@ -167,6 +170,7 @@ program
 
       const existingLock = await readLiveLock();
       if (existingLock) {
+        const activeDebug = await warnIfDebugRequestedButInactive(debug, existingLock.port);
         const codex = opts.codex === false ? null : await refreshCodexHome(existingLock.port, opts.codexModel ?? null);
         const pi = opts.pi === false ? null : await refreshPiHome(existingLock.port);
         const claude = buildClaudeExportCommand(existingLock.port, null);
@@ -174,7 +178,8 @@ program
           port: existingLock.port,
           pid: existingLock.pid,
           mode: "already_running",
-          debug: false,
+          debug: activeDebug,
+          debugLogPath: null,
           codex,
           pi
         });
@@ -182,6 +187,7 @@ program
           status: "already_running",
           pid: existingLock.pid,
           port: existingLock.port,
+          debug: activeDebug,
           url: `http://127.0.0.1:${existingLock.port}`,
           codex_home: codex?.outDir ?? null,
           codex_export_command: codex?.exportCommand ?? null,
@@ -199,12 +205,13 @@ program
       }
 
       const daemonArgs = [process.argv[1], "daemon"];
-      if (opts.debug) {
+      if (debug) {
         daemonArgs.push("--debug");
       }
       const child = spawn(process.execPath, daemonArgs, {
         detached: true,
-        stdio: "ignore"
+        stdio: "ignore",
+        env: daemonSpawnEnv(debug)
       });
       child.unref();
 
@@ -220,7 +227,8 @@ program
         port: started.port,
         pid: started.pid,
         mode: "detached",
-        debug: Boolean(opts.debug),
+        debug,
+        debugLogPath: currentDebugLogPath(debug),
         codex,
         pi
       });
@@ -230,7 +238,8 @@ program
         mode: "detached",
         pid: started.pid,
         port: started.port,
-        debug: Boolean(opts.debug),
+        debug,
+        debug_log_path: currentDebugLogPath(debug),
         url: `http://127.0.0.1:${started.port}`,
         codex_home: codex?.outDir ?? null,
         codex_export_command: codex?.exportCommand ?? null,
@@ -252,8 +261,9 @@ program
     // Foreground path: interactively prompt for login if needed.
     await ensureAuthenticatedInteractive();
 
-    const started = await runDaemon({ debug: Boolean(opts.debug) });
+    const started = await runDaemon({ debug });
     if (started.kind === "already_running") {
+      const activeDebug = await warnIfDebugRequestedButInactive(debug, started.lock.port);
       const codex = opts.codex === false ? null : await refreshCodexHome(started.lock.port, opts.codexModel ?? null);
       const pi = opts.pi === false ? null : await refreshPiHome(started.lock.port);
       const claude = buildClaudeExportCommand(started.lock.port, null);
@@ -261,7 +271,8 @@ program
         port: started.lock.port,
         pid: started.lock.pid,
         mode: "already_running",
-        debug: false,
+        debug: activeDebug,
+        debugLogPath: null,
         codex,
         pi
       });
@@ -269,6 +280,7 @@ program
         status: "already_running",
         pid: started.lock.pid,
         port: started.lock.port,
+        debug: activeDebug,
         url: `http://127.0.0.1:${started.lock.port}`,
         codex_home: codex?.outDir ?? null,
         codex_export_command: codex?.exportCommand ?? null,
@@ -292,7 +304,8 @@ program
       port: started.port,
       pid: process.pid,
       mode: "foreground",
-      debug: Boolean(opts.debug),
+      debug,
+      debugLogPath: currentDebugLogPath(debug),
       codex,
       pi
     });
@@ -302,7 +315,8 @@ program
       mode: "foreground",
       pid: process.pid,
       port: started.port,
-      debug: Boolean(opts.debug),
+      debug,
+      debug_log_path: currentDebugLogPath(debug),
       url: `http://127.0.0.1:${started.port}`,
       caller_secret: started.callerSecret,
       codex_home: codex?.outDir ?? null,
@@ -326,11 +340,13 @@ program
   .description("Internal background command")
   .option("--debug", "Enable debug endpoints")
   .action(async (opts: { debug?: boolean }) => {
-    const started = await runDaemon({ debug: Boolean(opts.debug) });
+    const debug = resolveCopillmDebug(opts.debug);
+    enableRuntimeDebug(debug);
+    const started = await runDaemon({ debug });
     if (started.kind === "already_running") {
       process.exit(0);
     }
-    process.stdout.write(`copillm listening on http://127.0.0.1:${started.port}${opts.debug ? " [debug]" : ""}\n`);
+    process.stdout.write(`copillm listening on http://127.0.0.1:${started.port}${debug ? " [debug]" : ""}\n`);
   });
 
 program
@@ -747,7 +763,9 @@ program
       forwardedArgs: string[],
       opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
     ) => {
-      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const debug = resolveCopillmDebug(opts.copillmDebug);
+      enableRuntimeDebug(debug);
+      const lock = await ensureDaemonRunningForLauncher({ debug });
       const codex = await refreshCodexHome(lock.port, null);
       if (!codex) {
         throw new Error("Failed to prepare Codex home (see warning above).");
@@ -791,7 +809,9 @@ program
       forwardedArgs: string[],
       opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
     ) => {
-      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const debug = resolveCopillmDebug(opts.copillmDebug);
+      enableRuntimeDebug(debug);
+      const lock = await ensureDaemonRunningForLauncher({ debug });
       const claude = buildClaudeExportCommand(lock.port, null);
       const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CLAUDE_VERSION ?? undefined;
       const conflicts = detectClaudeSettingsConflicts(claude.bundle.env);
@@ -834,7 +854,9 @@ program
       forwardedArgs: string[],
       opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
     ) => {
-      const lock = await ensureDaemonRunningForLauncher({ debug: Boolean(opts.copillmDebug) });
+      const debug = resolveCopillmDebug(opts.copillmDebug);
+      enableRuntimeDebug(debug);
+      const lock = await ensureDaemonRunningForLauncher({ debug });
       const pi = await refreshPiHome(lock.port);
       if (!pi) {
         throw new Error("Failed to prepare pi models.json (see warning above).");
@@ -1122,6 +1144,36 @@ function writeCommandOutput(opts: { json?: boolean }, humanLine: string, payload
   process.stdout.write(`${humanLine}\n`);
 }
 
+function resolveCopillmDebug(commandDebug?: boolean): boolean {
+  return Boolean(commandDebug) || Boolean(program.opts<{ debug?: boolean }>().debug);
+}
+
+function enableRuntimeDebug(debug: boolean): void {
+  if (!debug) {
+    return;
+  }
+  process.env.COPILLM_LOG_LEVEL = "debug";
+  logger.level = "debug";
+}
+
+function currentDebugLogPath(debug: boolean): null | string {
+  if (!debug) {
+    return null;
+  }
+  return process.env.COPILLM_LOG_FILE ?? debugLogPath();
+}
+
+function daemonSpawnEnv(debug: boolean): NodeJS.ProcessEnv {
+  if (!debug) {
+    return process.env;
+  }
+  return {
+    ...process.env,
+    COPILLM_LOG_LEVEL: "debug",
+    COPILLM_LOG_FILE: currentDebugLogPath(true) ?? debugLogPath()
+  };
+}
+
 function formatStopHumanLine(
   primary: string,
   cache: { cleared: boolean; reason: null | string }
@@ -1200,6 +1252,7 @@ function formatStartBanner(input: {
   pid: number;
   mode: "foreground" | "detached" | "already_running";
   debug: boolean;
+  debugLogPath: null | string;
   codex: null | Awaited<ReturnType<typeof generateCodexHome>>;
   pi: PiInitResult | null;
 }): string {
@@ -1212,6 +1265,9 @@ function formatStartBanner(input: {
   );
   if (input.codex) {
     lines.push(`   ${input.codex.modelCount} Copilot models discovered \u00B7 default: ${input.codex.defaultModel}`);
+  }
+  if (input.debugLogPath) {
+    lines.push(`   debug log: ${displayHomePath(input.debugLogPath)}`);
   }
   if (input.pi) {
     lines.push(`   pi: wrote ${input.pi.modelCount} models to ${displayHomePath(input.pi.configPath)}${input.pi.backupPath ? ` (backed up prior config to ${displayHomePath(input.pi.backupPath)})` : ""}`);
@@ -1248,6 +1304,28 @@ function displayHomePath(p: string): string {
 async function probeLivez(port: number): Promise<boolean> {
   try {
     const response = await fetch(`http://127.0.0.1:${port}/livez`, { signal: AbortSignal.timeout(800) });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function warnIfDebugRequestedButInactive(debugRequested: boolean, port: number): Promise<boolean> {
+  if (!debugRequested) {
+    return false;
+  }
+  const active = await probeDebugEndpoint(port);
+  if (!active) {
+    process.stderr.write(
+      `warning: copillm is already running without debug mode; run \`copillm stop\` then \`copillm --debug start --detach\` to enable daemon diagnostics.\n`
+    );
+  }
+  return active;
+}
+
+async function probeDebugEndpoint(port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/_debug`, { signal: AbortSignal.timeout(1_200) });
     return response.ok;
   } catch {
     return false;
@@ -1375,14 +1453,23 @@ function parseAgentName(raw: string): AgentName {
 
 async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): Promise<LockFileData> {
   const live = await readLiveLock();
-  if (live) return live;
+  if (live) {
+    await warnIfDebugRequestedButInactive(opts.debug, live.port);
+    return live;
+  }
 
-  process.stderr.write(`Starting copillm in background...\n`);
+  const debugLog = currentDebugLogPath(opts.debug);
+  process.stderr.write(
+    opts.debug && debugLog
+      ? `Starting copillm in background with debug logging at ${displayHomePath(debugLog)}...\n`
+      : `Starting copillm in background...\n`
+  );
   const daemonArgs = [process.argv[1], "daemon"];
   if (opts.debug) daemonArgs.push("--debug");
   const child = spawn(process.execPath, daemonArgs, {
     detached: true,
-    stdio: "ignore"
+    stdio: "ignore",
+    env: daemonSpawnEnv(opts.debug)
   });
   child.unref();
 

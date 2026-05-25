@@ -42,6 +42,10 @@ export function modelsCacheReadPath(): string {
   return resolveReadablePath("models.cache.json");
 }
 
+export function debugLogPath(): string {
+  return path.join(getCopillmHome(), "debug.log");
+}
+
 function resolveReadablePath(fileName: string): string {
   const canonical = path.join(getCopillmHome(), fileName);
   if (fs.existsSync(canonical)) {

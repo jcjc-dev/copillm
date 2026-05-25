@@ -14,13 +14,22 @@ The copillm daemon is a local HTTP proxy that exposes OpenAI- and Anthropic-comp
 Start the daemon. Runs in the foreground by default and prompts for interactive login when no credential is stored.
 
 ```bash
-copillm start [--detach] [--json]
+copillm [--debug] start [--detach] [--debug] [--json]
 ```
 
 | Flag | Description |
 | --- | --- |
 | `--detach` | Run the daemon as a background process. Fails fast with a clear message if no credential is stored. |
+| `--debug` | Compatibility alias for global `copillm --debug start`. Enables `/_debug`, debug-level daemon diagnostics, and (with `--detach`) writes logs to `~/.copillm/debug.log`. |
 | `--json` | Emit a JSON result instead of human output. |
+
+Prefer the global form for consistency:
+
+```bash
+copillm --debug start --detach
+```
+
+If a daemon is already running without debug mode, stop it first; copillm will not restart a live daemon just to change diagnostics.
 
 ## `copillm stop`
 
@@ -55,3 +64,5 @@ copillm health [--json]
 | Variable | Purpose |
 | --- | --- |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
+| `COPILLM_LOG_LEVEL` | Override daemon log level (`debug`, `info`, `warn`, etc.). |
+| `COPILLM_LOG_FILE` | Write daemon logs to a specific file. `copillm --debug start --detach` defaults this to `~/.copillm/debug.log`. |

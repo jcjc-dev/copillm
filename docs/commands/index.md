@@ -10,6 +10,14 @@ permalink: /commands/
 
 The `copillm` CLI groups commands by domain. Every command accepts `--json` for machine-readable output.
 
+## Global flags
+
+| Flag | Description |
+| --- | --- |
+| `--debug` | Enable copillm debug mode for the command. For daemon starts this enables `/_debug`, sets daemon logging to debug, and writes detached daemon logs to `~/.copillm/debug.log`. Put this before the subcommand, e.g. `copillm --debug claude`. |
+
+Agent arguments still belong after the agent command. For example, `copillm --debug claude -- --debug` enables copillm debug mode and forwards `--debug` to Claude Code.
+
 | Group | Description |
 | --- | --- |
 | [`auth`](auth/) | Sign in, sign out, and inspect credential state. |
