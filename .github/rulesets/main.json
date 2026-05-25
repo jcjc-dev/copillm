@@ -22,6 +22,22 @@
         "automatic_copilot_code_review_enabled": false,
         "allowed_merge_methods": ["merge", "squash", "rebase"]
       }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": false,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [
+          { "context": "ubuntu-latest / Node 22", "integration_id": 15368 },
+          { "context": "ubuntu-latest / Node 20", "integration_id": 15368 },
+          { "context": "macos-latest / Node 22", "integration_id": 15368 },
+          { "context": "macos-latest / Node 20", "integration_id": 15368 },
+          { "context": "windows-latest / Node 22", "integration_id": 15368 },
+          { "context": "windows-latest / Node 20", "integration_id": 15368 },
+          { "context": "Jekyll build", "integration_id": 15368 }
+        ]
+      }
     }
   ],
   "bypass_actors": []
