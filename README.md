@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/copillm.svg)](https://www.npmjs.com/package/copillm)
 [![Node.js version](https://img.shields.io/node/v/copillm.svg)](https://www.npmjs.com/package/copillm)
 
-A local proxy that exposes OpenAI- and Anthropic-compatible HTTP endpoints backed by a GitHub Copilot CLI subscription. A single login provides a unified gateway that Codex CLI, Claude Code, and other compatible tools can target directly.
+One Copilot subscription. Every coding agent. A unified gateway for Claude Code, Codex CLI, and any OpenAI- or Anthropic-compatible tool, with authentication, MCPs, and environment configs handled automatically.
 
 ## Requirements
 
