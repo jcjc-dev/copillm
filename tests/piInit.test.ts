@@ -147,7 +147,7 @@ afterEach(() => {
 describe("generatePiHome", () => {
   it("writes a two-provider models.json with per-model context windows and routes /responses-only models separately", async () => {
     const { generatePiHome, defaultOutputDir, piModelsJsonPath } = await import(
-      "../src/pi/init.js"
+      "../src/integrations/pi/init.js"
     );
 
     const outDir = defaultOutputDir(tmpCopillmHome);
@@ -205,7 +205,7 @@ describe("generatePiHome", () => {
 
   it("backs up a pre-existing models.json when the new content differs", async () => {
     const { generatePiHome, defaultOutputDir, piModelsJsonPath } = await import(
-      "../src/pi/init.js"
+      "../src/integrations/pi/init.js"
     );
 
     // Seed an unrelated pre-existing config that pi would have read.
@@ -232,7 +232,7 @@ describe("generatePiHome", () => {
 
   it("does NOT create a backup when the existing file is byte-identical", async () => {
     const { generatePiHome, defaultOutputDir, piModelsJsonPath } = await import(
-      "../src/pi/init.js"
+      "../src/integrations/pi/init.js"
     );
 
     // First call produces the canonical file; second call must not back it up.
@@ -250,7 +250,7 @@ describe("generatePiHome", () => {
   });
 
   it("falls back to provider id 'copillm' when given whitespace", async () => {
-    const { generatePiHome, defaultOutputDir } = await import("../src/pi/init.js");
+    const { generatePiHome, defaultOutputDir } = await import("../src/integrations/pi/init.js");
     const outDir = defaultOutputDir(tmpCopillmHome);
     const result = await generatePiHome({ outDir, port: 5555, providerId: "   " });
     const live = JSON.parse(fs.readFileSync(result.configPath, "utf8"));

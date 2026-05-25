@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   detectClaudeSettingsConflicts,
   formatSettingsConflictWarning
-} from "../src/claude/settingsConflict.js";
+} from "../src/integrations/claude/settingsConflict.js";
 
 const tmpDirs: string[] = [];
 

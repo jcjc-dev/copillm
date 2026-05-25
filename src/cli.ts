@@ -17,15 +17,15 @@ import { startProxyServer } from "./server/proxy.js";
 import {
   defaultOutputDir,
   generateCodexHome
-} from "./codex/init.js";
+} from "./integrations/codex/init.js";
 import {
   defaultOutputDir as defaultPiOutputDir,
   generatePiHome,
   type PiInitResult
-} from "./pi/init.js";
+} from "./integrations/pi/init.js";
 import { debugLogPath, getCopillmHome } from "./config/home.js";
-import { clearClaudeGatewayCache } from "./claude/cache.js";
-import { detectClaudeSettingsConflicts, formatSettingsConflictWarning } from "./claude/settingsConflict.js";
+import { clearClaudeGatewayCache } from "./integrations/claude/cache.js";
+import { detectClaudeSettingsConflicts, formatSettingsConflictWarning } from "./integrations/claude/settingsConflict.js";
 import {
   buildClaudeExportCommand as buildClaudeExport,
   computeAnthropicDefaults,
@@ -36,7 +36,7 @@ import type { LockFileData } from "./types/index.js";
 import { isShellSyntax, renderEnvBlock, type ShellSyntax } from "./cli/envBlock.js";
 import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle, type ClaudeEnvBundle, type CodexEnvBundle } from "./cli/agentEnv.js";
 import { launchAgent } from "./cli/launchAgent.js";
-import type { AgentName } from "./cli/resolveAgent.js";
+import type { AgentName } from "./integrations/registry.js";
 import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
 import { registerConfigCommands } from "./cli/configCommands.js";
 import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
