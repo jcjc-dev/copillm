@@ -25,6 +25,15 @@ describe("anthropicDefaults.computeAnthropicDefaults", () => {
     });
   });
 
+  it("does not prefer a 1M Opus variant over a plain default", () => {
+    const defaults = computeAnthropicDefaults([
+      "claude-opus-4.7",
+      "claude-opus-4.7-1m-internal[1m]",
+      "claude-sonnet-4.6"
+    ]);
+    expect(defaults.opus).toBe("claude-opus-4.7");
+  });
+
   it("returns null for families that have no models", () => {
     const defaults = computeAnthropicDefaults(["claude-opus-4.7", "gpt-5"]);
     expect(defaults.opus).toBe("claude-opus-4.7");

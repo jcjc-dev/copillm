@@ -194,6 +194,61 @@ describe("proxy resilience: client disconnect mid-stream (/anthropic/v1/messages
 });
 
 describe("proxy resilience: upstream errors after headers flushed", () => {
+  it("surfaces upstream 400 diagnostics on non-stream Anthropic requests", async () => {
+    if (!harness) throw new Error("harness not started");
+
+    harness.setHandlers({
+      onChatCompletions: async (_req, res) => {
+        res.statusCode = 400;
+        res.setHeader("Content-Type", "application/json");
+        res.end(
+          JSON.stringify({
+            error: {
+              code: "context_length_exceeded",
+              type: "invalid_request_error",
+              message: "input is too long for the selected model"
+            }
+          })
+        );
+      }
+    });
+
+    const response = await fetch(`${harness.baseUrl}/anthropic/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer copillm-test"
+      },
+      body: JSON.stringify({
+        model: "claude-test-sonnet",
+        max_tokens: 64,
+        messages: [{ role: "user", content: "ping" }]
+      })
+    });
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as {
+      type?: string;
+      error?: {
+        type?: string;
+        code?: string;
+        message?: string;
+        upstream_status_code?: number;
+        request_id?: string;
+      };
+    };
+    expect(body).toMatchObject({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        code: "context_length_exceeded",
+        message: "context_length_exceeded: input is too long for the selected model",
+        upstream_status_code: 400
+      }
+    });
+    expect(typeof body.error?.request_id).toBe("string");
+  });
+
   it("survives upstream socket destroy after the Anthropic prelude was sent", async () => {
     if (!harness) throw new Error("harness not started");
 
