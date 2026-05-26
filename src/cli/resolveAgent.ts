@@ -3,23 +3,10 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getCopillmHome } from "../config/home.js";
+import { type AgentName, AGENT_REGISTRY } from "../integrations/registry.js";
 
-export type AgentName = "codex" | "claude" | "pi" | "copilot";
+export type { AgentName };
 export type ResolveSource = "path" | "cache" | "installed";
-
-const NPM_PACKAGES: Record<AgentName, string> = {
-  codex: "@openai/codex",
-  claude: "@anthropic-ai/claude-code",
-  pi: "@earendil-works/pi-coding-agent",
-  copilot: "@github/copilot"
-};
-
-const BIN_NAMES: Record<AgentName, string> = {
-  codex: "codex",
-  claude: "claude",
-  pi: "pi",
-  copilot: "copilot"
-};
 
 export interface ResolveOptions {
   pinnedSpec?: string;
@@ -41,11 +28,11 @@ export interface ResolveResult {
 }
 
 export function packageNameFor(agent: AgentName): string {
-  return NPM_PACKAGES[agent];
+  return AGENT_REGISTRY[agent].npmPackage;
 }
 
 export function binNameFor(agent: AgentName): string {
-  return BIN_NAMES[agent];
+  return AGENT_REGISTRY[agent].binName;
 }
 
 interface ParsedPin {
@@ -56,11 +43,11 @@ interface ParsedPin {
 export function parsePinSpec(agent: AgentName, raw: string): ParsedPin {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
-    return { packageName: NPM_PACKAGES[agent], version: null };
+    return { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
   }
   // Bare version like "1.4.7" or "^1.0.0"
   if (/^[\d^~><=*]/.test(trimmed)) {
-    return { packageName: NPM_PACKAGES[agent], version: trimmed };
+    return { packageName: AGENT_REGISTRY[agent].npmPackage, version: trimmed };
   }
   // <pkg>@<version>; tolerate scoped pkgs starting with @
   const isScoped = trimmed.startsWith("@");
@@ -80,9 +67,9 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const npmExe = opts.npmExecutable ?? defaultNpmExecutable();
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
 
-  const pin = opts.pinnedSpec ? parsePinSpec(agent, opts.pinnedSpec) : { packageName: NPM_PACKAGES[agent], version: null };
+  const pin = opts.pinnedSpec ? parsePinSpec(agent, opts.pinnedSpec) : { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
   const pkg = pin.packageName;
-  const binName = BIN_NAMES[agent];
+  const binName = AGENT_REGISTRY[agent].binName;
   const agentRoot = path.join(cacheRoot, agent);
 
   // 1. PATH lookup (skipped when user pinned a specific version)

@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { resolveAgent, type AgentName } from "./resolveAgent.js";
+import { resolveAgent } from "./resolveAgent.js";
+import { type AgentName } from "../integrations/registry.js";
 
 export interface LaunchOptions {
   agent: AgentName;

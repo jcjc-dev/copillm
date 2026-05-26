@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CopilotTokenManager } from "../auth/copilotToken.js";
-import { loadStoredCredential } from "../auth/credentials.js";
-import { loadConfig } from "../config/config.js";
-import { listModelsUnion } from "../models/discovery.js";
-import { ensureSecureDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
-import { buildCodexCatalog } from "../server/codexSchema.js";
-import { inspectLock } from "../server/lock.js";
+import { CopilotTokenManager } from "../../auth/copilotToken.js";
+import { loadStoredCredential } from "../../auth/credentials.js";
+import { loadConfig } from "../../config/config.js";
+import { listModelsUnion } from "../../models/discovery.js";
+import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
+import { buildCodexCatalog } from "../../server/codexSchema.js";
+import { inspectLock } from "../../server/lock.js";
 
 export interface CodexInitOptions {
   outDir: string;
