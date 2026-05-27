@@ -54,10 +54,36 @@ const McpSchema = z
 
 const PassthroughRecord = z.record(z.unknown());
 
+/**
+ * Per-agent yolo overrides. Keys must match the `AgentName` union in
+ * `src/integrations/registry.ts`; unknown keys are rejected so typos surface
+ * at config-load time rather than silently doing nothing.
+ */
+const YoloAgentsSchema = z
+  .object({
+    claude: z.boolean().optional(),
+    codex: z.boolean().optional(),
+    copilot: z.boolean().optional(),
+    pi: z.boolean().optional()
+  })
+  .strict();
+
+const YoloSchema = z
+  .object({
+    /** Profile-wide default applied to every supported agent unless overridden. */
+    enabled: z.boolean().optional(),
+    /** Per-agent overrides; takes precedence over `enabled`. */
+    agents: YoloAgentsSchema.optional()
+  })
+  .strict();
+
+export type YoloConfig = z.infer<typeof YoloSchema>;
+
 const SectionSchema = z
   .object({
     instructions: InstructionsSchema.optional(),
     mcp: McpSchema.optional(),
+    yolo: YoloSchema.optional(),
     // v1 reserved sections: validated as objects but not interpreted.
     skills: PassthroughRecord.optional(),
     agents: PassthroughRecord.optional(),
@@ -81,6 +107,12 @@ export type AgentToml = z.infer<typeof AgentTomlSchema>;
 export interface ResolvedProfile {
   instructions: { body: string } | null;
   mcpServers: Record<string, McpServerEntry>;
+  /**
+   * Merged yolo settings from defaults + active profile. Null when no layer
+   * declared a [...yolo] block; callers should treat that as "no opinion" and
+   * fall back to the explicit --yolo flag / COPILLM_YOLO env var.
+   */
+  yolo: YoloConfig | null;
   // Reserved-but-empty in v1; surfaced for `copillm config show` so users see
   // their data is loaded even though no renderer consumes it yet.
   reserved: {

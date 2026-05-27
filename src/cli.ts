@@ -39,7 +39,8 @@ import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle, type Claud
 import { launchAgent } from "./cli/launchAgent.js";
 import type { AgentName } from "./integrations/registry.js";
 import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
-import { applyYolo, resolveYolo } from "./agents/registry.js";
+import type { ApplyResult } from "./agentconfig/render.js";
+import { applyYolo, resolveYoloWithSource } from "./agents/registry.js";
 import { registerConfigCommands } from "./cli/configCommands.js";
 import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
 
@@ -763,6 +764,41 @@ program
     process.exit(0);
   });
 
+/**
+ * Shared yolo wiring for the four agent subcommands. Resolves precedence
+ * (flag > env > profile > defaults > off), runs `applyYolo` with source
+ * attribution so the unsupported-agent warning carries traceable origin
+ * info, and emits a one-line stderr notice when yolo was turned on by a
+ * config layer rather than the explicit --yolo flag (so users aren't
+ * surprised by silently-skipped approvals).
+ */
+function applyYoloForLaunch(params: {
+  agent: AgentName;
+  flag: boolean | undefined;
+  applyResult: ApplyResult;
+  baseArgs: string[];
+}): string[] {
+  const decision = resolveYoloWithSource({
+    agent: params.agent,
+    flag: params.flag,
+    profile: {
+      yolo: params.applyResult.yolo,
+      profileName: params.applyResult.active
+    }
+  });
+  if (decision.value && decision.source !== "flag" && decision.source !== "env") {
+    process.stderr.write(
+      `copillm: yolo enabled for ${params.agent} via ${decision.label}\n`
+    );
+  }
+  return applyYolo({
+    agent: params.agent,
+    userArgs: params.baseArgs,
+    yolo: decision.value,
+    source: decision.source
+  });
+}
+
 program
   .command("codex")
   .description("Launch Codex CLI against copillm (auto-starts daemon, downloads codex if missing)")
@@ -801,7 +837,7 @@ program
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
       const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
-      const args = applyYolo({ agent: "codex", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
+      const args = applyYoloForLaunch({ agent: "codex", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "codex",
         args,
@@ -849,7 +885,7 @@ program
       }
       const env = { ...claude.bundle.env, ...applyResult.envOverlay };
       const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
-      const args = applyYolo({ agent: "claude", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
+      const args = applyYoloForLaunch({ agent: "claude", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "claude",
         args,
@@ -897,7 +933,7 @@ program
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
       const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
-      const args = applyYolo({ agent: "pi", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
+      const args = applyYoloForLaunch({ agent: "pi", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "pi",
         args,
@@ -951,7 +987,7 @@ program
         COPILOT_GITHUB_TOKEN: credential.token
       };
       const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
-      const args = applyYolo({ agent: "copilot", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
+      const args = applyYoloForLaunch({ agent: "copilot", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "copilot",
         args,

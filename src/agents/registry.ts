@@ -52,6 +52,12 @@ export interface ApplyYoloOptions {
   agent: AgentName;
   userArgs: readonly string[];
   yolo: boolean;
+  /**
+   * Where the yolo decision came from. Surfaced in the unsupported-agent
+   * warning so users can trace surprising behaviour back to its origin
+   * (flag vs env vs profile vs defaults).
+   */
+  source?: YoloSource;
   /** Sink for the "unsupported" warning. Defaults to process.stderr. */
   warn?: (line: string) => void;
 }
@@ -78,22 +84,130 @@ export function applyYolo(options: ApplyYoloOptions): string[] {
     }
     case "unsupported": {
       const warn = options.warn ?? ((line: string) => process.stderr.write(`${line}\n`));
-      warn(`copillm: --yolo ignored for ${options.agent} (${spec.reason})`);
+      const sourceSuffix = options.source ? `; source: ${describeSource(options.source)}` : "";
+      warn(`copillm: --yolo ignored for ${options.agent} (${spec.reason}${sourceSuffix})`);
       return args;
     }
   }
 }
 
 /**
- * Read the `COPILLM_YOLO` env var as a boolean. Accepts "1", "true", "yes"
- * (case-insensitive) as truthy; everything else (including unset) is false.
+ * Tri-state read of `COPILLM_YOLO`:
+ *   - "1" | "true" | "yes" (case-insensitive)  → true   (explicit on)
+ *   - "0" | "false" | "no" (case-insensitive)  → false  (explicit off; can
+ *     veto config-driven yolo but not the explicit --yolo flag)
+ *   - unset / empty / anything else            → undefined (no opinion)
+ *
+ * Returning undefined for "unset" lets `resolveYoloWithSource` fall through
+ * to the config layers; previously the env var only had a truthy path.
  */
-export function yoloFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+export function yoloFromEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
   const raw = env.COPILLM_YOLO?.trim().toLowerCase();
-  return raw === "1" || raw === "true" || raw === "yes";
+  if (raw === undefined || raw === "") return undefined;
+  if (raw === "1" || raw === "true" || raw === "yes") return true;
+  if (raw === "0" || raw === "false" || raw === "no") return false;
+  return undefined;
 }
 
-/** Combine the per-launch flag with the env var fallback. */
+/**
+ * Where a yolo decision came from. Ordered roughly by precedence (highest
+ * first) for documentation; the actual precedence chain lives in
+ * `resolveYoloWithSource`.
+ */
+export type YoloSource =
+  | "flag"
+  | "env"
+  | "profile.agents"
+  | "profile.enabled"
+  | "defaults.agents"
+  | "defaults.enabled"
+  | "off";
+
+export interface ProfileYoloView {
+  /** Effective merged yolo block (defaults + active profile), if any. */
+  yolo: { enabled?: boolean; agents?: Partial<Record<AgentName, boolean>> } | null;
+  /** Name of the active profile, used to label the warning source. */
+  profileName?: string | null;
+}
+
+export interface ResolveYoloInput {
+  agent: AgentName;
+  flag?: boolean;
+  env?: NodeJS.ProcessEnv;
+  profile?: ProfileYoloView | null;
+}
+
+export interface ResolvedYoloDecision {
+  value: boolean;
+  source: YoloSource;
+  /** Human label for the source, e.g. `profile "solo"` or `COPILLM_YOLO env`. */
+  label: string;
+}
+
+/**
+ * Precedence (top wins):
+ *   1. --yolo CLI flag
+ *   2. COPILLM_YOLO env var (tri-state — explicit off counts)
+ *   3. profile.agents[<agent>]
+ *   4. profile.enabled
+ *   5. defaults.agents[<agent>]   (folded into profile view by mergeYolo)
+ *   6. defaults.enabled            (ditto)
+ *   7. off
+ *
+ * Because `mergeYolo` already collapses defaults+profile into a single layer
+ * with profile-wins semantics, we only need to consult one merged view here.
+ * The source label distinguishes "profile" vs "defaults" only when we know
+ * the profile name (callers pass it through `profile.profileName`).
+ */
+export function resolveYoloWithSource(input: ResolveYoloInput): ResolvedYoloDecision {
+  if (input.flag) {
+    return { value: true, source: "flag", label: "--yolo flag" };
+  }
+  const fromEnv = yoloFromEnv(input.env ?? process.env);
+  if (fromEnv !== undefined) {
+    return { value: fromEnv, source: "env", label: "COPILLM_YOLO env" };
+  }
+  const y = input.profile?.yolo;
+  if (y) {
+    const profileLabel = input.profile?.profileName
+      ? `profile "${input.profile.profileName}"`
+      : "agent.toml";
+    const perAgent = y.agents?.[input.agent];
+    if (perAgent !== undefined) {
+      return { value: perAgent, source: "profile.agents", label: `${profileLabel} (agents.${input.agent})` };
+    }
+    if (y.enabled !== undefined) {
+      return { value: y.enabled, source: "profile.enabled", label: `${profileLabel} (enabled)` };
+    }
+  }
+  return { value: false, source: "off", label: "default off" };
+}
+
+/**
+ * Back-compat shim for callers that don't (yet) thread the merged profile
+ * through. Kept so older entry points keep compiling; new code should prefer
+ * `resolveYoloWithSource` and pass the result's `value` + `source` into
+ * `applyYolo` so unsupported-agent warnings carry attribution.
+ */
 export function resolveYolo(flag: boolean | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(flag) || yoloFromEnv(env);
+  return resolveYoloWithSource({ agent: "claude", flag, env }).value;
+}
+
+function describeSource(source: YoloSource): string {
+  switch (source) {
+    case "flag":
+      return "--yolo flag";
+    case "env":
+      return "COPILLM_YOLO env";
+    case "profile.agents":
+      return "profile agents map";
+    case "profile.enabled":
+      return "profile enabled";
+    case "defaults.agents":
+      return "defaults agents map";
+    case "defaults.enabled":
+      return "defaults enabled";
+    case "off":
+      return "default off";
+  }
 }

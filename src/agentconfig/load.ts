@@ -8,7 +8,8 @@ import {
   type AgentToml,
   type McpServerEntry,
   type ResolvedProfile,
-  type Section
+  type Section,
+  type YoloConfig
 } from "./schema.js";
 
 export interface LoadOptions {
@@ -158,7 +159,36 @@ function mergeAndResolve(input: {
     permissions: mergeRecord(layers, "permissions")
   };
 
-  return { instructions, mcpServers: servers, reserved };
+  const yolo = mergeYolo(layers);
+
+  return { instructions, mcpServers: servers, yolo, reserved };
+}
+
+/**
+ * Layer yolo blocks across defaults + active profile. Later layers (project
+ * over global, profile over defaults) override earlier ones at the field
+ * level: `enabled` is replaced wholesale, `agents.<id>` is merged per-key so
+ * a profile can toggle a single agent without clearing the rest.
+ *
+ * Returns null when no layer declared `[...yolo]`, so callers can distinguish
+ * "config has no opinion" from "config explicitly said false".
+ */
+function mergeYolo(layers: Section[]): YoloConfig | null {
+  let saw = false;
+  let enabled: boolean | undefined;
+  const agents: NonNullable<YoloConfig["agents"]> = {};
+  for (const layer of layers) {
+    const y = layer.yolo;
+    if (!y) continue;
+    saw = true;
+    if (y.enabled !== undefined) enabled = y.enabled;
+    if (y.agents) Object.assign(agents, y.agents);
+  }
+  if (!saw) return null;
+  const out: YoloConfig = {};
+  if (enabled !== undefined) out.enabled = enabled;
+  if (Object.keys(agents).length > 0) out.agents = agents;
+  return out;
 }
 
 function mergeRecord(layers: Section[], key: keyof Section): Record<string, unknown> {

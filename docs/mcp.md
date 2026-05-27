@@ -179,6 +179,50 @@ Prefer ripgrep over find.
 """
 ```
 
+## Yolo (skip-approvals) configuration
+
+Every agent subcommand accepts `--yolo` to bypass approval prompts. The flag is translated per-agent: `--dangerously-skip-permissions` (claude), `--dangerously-bypass-approvals-and-sandbox` (codex), `--allow-all` (copilot), warning-only for `pi` (no equivalent).
+
+Instead of typing `--yolo` every launch, set it once in `agent.toml`. Both `[defaults.yolo]` and `[profiles.<name>.yolo]` accept the same shape:
+
+```toml
+[defaults.yolo]
+enabled = false           # baseline applied to every agent
+
+[defaults.yolo.agents]
+claude = true             # auto-skip prompts for claude everywhere
+
+[profiles.solo.yolo]
+enabled = true            # turn on for all agents under this profile
+[profiles.solo.yolo.agents]
+codex = false             # ...except codex, still prompts
+
+[profiles.work.yolo.agents]
+copilot = true            # only copilot is yolo in "work"
+```
+
+### Precedence (highest wins)
+
+1. `--yolo` CLI flag
+2. `COPILLM_YOLO` env var — **tri-state**: `1`/`true`/`yes` turns on, `0`/`false`/`no` explicitly turns off (overrides config), unset means "no opinion"
+3. `profiles.<active>.yolo.agents.<id>`
+4. `profiles.<active>.yolo.enabled`
+5. `defaults.yolo.agents.<id>`
+6. `defaults.yolo.enabled`
+7. off
+
+When yolo is enabled by config (not by the flag or env), copillm prints a one-line notice on stderr at launch so skipped approvals are never silent:
+
+```
+copillm: yolo enabled for claude via profile "solo" (enabled)
+```
+
+If a profile turns on yolo for `pi`, copillm forwards the args unchanged and warns — pi has no blanket-approve switch:
+
+```
+copillm: --yolo ignored for pi (pi has no blanket-approve flag; ...; source: profile enabled)
+```
+
 ## Commands reference
 
 | Command | What it does |

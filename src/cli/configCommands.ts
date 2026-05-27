@@ -26,6 +26,16 @@ body = ""
 # url = "https://api.githubcopilot.com/mcp/"
 # headers = { Authorization = "Bearer \${GITHUB_TOKEN}" }
 
+# Uncomment to control --yolo without typing the flag every launch.
+# Precedence: --yolo flag > COPILLM_YOLO env (1/true/yes or 0/false/no) >
+# profile.yolo.agents.<id> > profile.yolo.enabled > defaults.* > off.
+# [defaults.yolo]
+# enabled = false
+# [defaults.yolo.agents]
+# claude = true        # auto-skip permission prompts for claude
+# codex = false        # still ask for codex
+# pi = false           # pi has no skip-permissions flag; emits a warning if true
+
 [profiles.default]
 `;
 
