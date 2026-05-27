@@ -343,11 +343,18 @@ program
   .action(async (opts: { debug?: boolean }) => {
     const debug = resolveCopillmDebug(opts.debug);
     enableRuntimeDebug(debug);
-    const started = await runDaemon({ debug });
-    if (started.kind === "already_running") {
-      process.exit(0);
+    try {
+      const started = await runDaemon({ debug });
+      if (started.kind === "already_running") {
+        process.exit(0);
+      }
+      process.stdout.write(`copillm listening on http://127.0.0.1:${started.port}${debug ? " [debug]" : ""}\n`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.fatal({ err }, "daemon failed to start");
+      process.stderr.write(`copillm daemon: ${message}\n`);
+      process.exit(1);
     }
-    process.stdout.write(`copillm listening on http://127.0.0.1:${started.port}${debug ? " [debug]" : ""}\n`);
   });
 
 program
@@ -1471,6 +1478,15 @@ async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): Promise
     return live;
   }
 
+  // Fail fast on missing credentials rather than spawning a detached daemon
+  // that will die silently and surface as a generic "start timed out" error.
+  const authState = await inspectStoredCredential();
+  if (!authState.stored) {
+    throw new Error(
+      "Not authenticated. Run `copillm auth login` first."
+    );
+  }
+
   const debugLog = currentDebugLogPath(opts.debug);
   process.stderr.write(
     opts.debug && debugLog
@@ -1481,18 +1497,43 @@ async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): Promise
   if (opts.debug) daemonArgs.push("--debug");
   const child = spawn(process.execPath, daemonArgs, {
     detached: true,
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "pipe"],
     env: daemonSpawnEnv(opts.debug)
   });
   child.unref();
 
+  const stderrChunks: Buffer[] = [];
+  let stderrBytes = 0;
+  const STDERR_TAIL_LIMIT = 8 * 1024;
+  if (child.stderr) {
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderrChunks.push(chunk);
+      stderrBytes += chunk.length;
+      while (stderrBytes > STDERR_TAIL_LIMIT && stderrChunks.length > 1) {
+        stderrBytes -= stderrChunks[0].length;
+        stderrChunks.shift();
+      }
+    });
+    child.stderr.on("error", () => {
+      // Ignore — best-effort capture only.
+    });
+  }
+
+  const formatStderrTail = (): string => {
+    const tail = Buffer.concat(stderrChunks).toString("utf8").trim();
+    return tail ? `\nDaemon stderr (tail):\n${tail}` : "";
+  };
+
   const started = await waitForDaemonReady(child.pid ?? null, 10_000);
   if (!started) {
-    throw new Error("Auto-start of copillm daemon timed out.");
+    if (child.pid !== undefined && !isPidAlive(child.pid)) {
+      throw new Error(`copillm daemon exited before becoming ready.${formatStderrTail()}`);
+    }
+    throw new Error(`Auto-start of copillm daemon timed out.${formatStderrTail()}`);
   }
   const inspection = inspectLock();
   if (inspection.state !== "running") {
-    throw new Error("copillm daemon failed to register a lock after auto-start.");
+    throw new Error(`copillm daemon failed to register a lock after auto-start.${formatStderrTail()}`);
   }
   return inspection.lock;
 }
