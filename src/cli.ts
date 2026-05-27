@@ -1066,7 +1066,7 @@ function candidatePorts(preferredPort: number): number[] {
 
 function describeBackend(backend: null | CredentialBackend): string {
   switch (backend) {
-    case "keytar":
+    case "keyring":
       return "OS keychain";
     case "file":
       return "credentials file";

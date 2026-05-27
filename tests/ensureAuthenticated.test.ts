@@ -23,7 +23,7 @@ function buildDeps(overrides: Partial<EnsureAuthenticatedDeps> = {}): {
     choose: vi.fn(async () => "session" as const),
     loginViaDeviceFlow: vi.fn(async () => "gho_TEST_TOKEN_FAKE"),
     loadAccountType: vi.fn(() => "individual" as const),
-    saveStoredCredential: vi.fn(async () => "keytar" as const),
+    saveStoredCredential: vi.fn(async () => "keyring" as const),
     describeBackend: vi.fn((backend) => `<${backend ?? "null"}>`),
     print: vi.fn((line) => {
       state.prints.push(line);
@@ -71,7 +71,7 @@ describe("ensureAuthenticatedInteractive — short-circuit paths", () => {
 describe("ensureAuthenticatedInteractive — happy save path", () => {
   it("saves via the default backend without prompting when save succeeds", async () => {
     const { deps, state } = buildDeps({
-      saveStoredCredential: vi.fn(async () => "keytar" as const)
+      saveStoredCredential: vi.fn(async () => "keyring" as const)
     });
     await ensureAuthenticatedInteractive(deps);
 

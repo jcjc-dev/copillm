@@ -9,18 +9,18 @@ import { writeFileSecureAtomic } from "../config/fsSecurity.js";
 const SERVICE = "copillm";
 const ACCOUNT = "github-oauth-token";
 
-interface KeytarLike {
+interface KeyringLike {
   getPassword(service: string, account: string): Promise<null | string>;
   setPassword(service: string, account: string, password: string): Promise<void>;
   deletePassword(service: string, account: string): Promise<boolean>;
 }
 
-export type CredentialBackend = "file" | "keytar" | "session";
+export type CredentialBackend = "file" | "keyring" | "session";
 
 export type SaveMode = "auto" | "session";
 
-interface KeytarResolution {
-  keytar: null | KeytarLike;
+interface KeyringResolution {
+  keyring: null | KeyringLike;
   reason: null | string;
 }
 
@@ -39,15 +39,62 @@ function forceSessionBackend(): boolean {
   return process.env.COPILLM_FORCE_SESSION_BACKEND === "1";
 }
 
-async function tryImportKeytar(): Promise<null | KeytarLike> {
+async function tryImportKeyring(): Promise<null | KeyringLike> {
   if (forceSessionBackend()) {
     return null;
   }
   try {
-    const mod = await import("keytar");
-    return mod.default as KeytarLike;
+    const mod = (await import("@napi-rs/keyring")) as unknown as {
+      AsyncEntry?: new (service: string, account: string) => {
+        getPassword(): Promise<string | undefined | null>;
+        setPassword(password: string): Promise<void>;
+        deletePassword(): Promise<unknown>;
+      };
+      default?: { AsyncEntry?: unknown } | null;
+    };
+    // Test seam: mocks can return `null` or `{ default: null }` to simulate an
+    // unavailable backend without throwing from the vi.mock factory (which
+    // confuses vitest's hoisting and our isMissingKeyringError check).
+    if (!mod) {
+      return null;
+    }
+    const AsyncEntry =
+      mod.AsyncEntry ?? (mod.default && typeof mod.default === "object" ? (mod.default as { AsyncEntry?: typeof mod.AsyncEntry }).AsyncEntry : undefined);
+    if (typeof AsyncEntry !== "function") {
+      return null;
+    }
+    return {
+      async getPassword(service, account) {
+        const entry = new AsyncEntry(service, account);
+        try {
+          const value = await entry.getPassword();
+          return value ?? null;
+        } catch (error) {
+          if (isNoEntryError(error)) {
+            return null;
+          }
+          throw error;
+        }
+      },
+      async setPassword(service, account, password) {
+        const entry = new AsyncEntry(service, account);
+        await entry.setPassword(password);
+      },
+      async deletePassword(service, account) {
+        const entry = new AsyncEntry(service, account);
+        try {
+          await entry.deletePassword();
+          return true;
+        } catch (error) {
+          if (isNoEntryError(error)) {
+            return false;
+          }
+          throw error;
+        }
+      }
+    };
   } catch (error) {
-    if (isMissingKeytarError(error)) {
+    if (isMissingKeyringError(error)) {
       return null;
     }
     if (error instanceof Error) {
@@ -57,15 +104,26 @@ async function tryImportKeytar(): Promise<null | KeytarLike> {
   }
 }
 
-async function resolveKeytar(): Promise<KeytarResolution> {
+// keyring-rs returns a "NoEntry" error when an item doesn't exist. Map that to
+// null/false to preserve the keytar-style "missing is not an error" semantics
+// that the rest of credentials.ts is built around.
+function isNoEntryError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return message.includes("no matching entry") || message.includes("no entry") || message.includes("noentry");
+}
+
+async function resolveKeyring(): Promise<KeyringResolution> {
   if (forceSessionBackend()) {
-    return { keytar: null, reason: "forced_session_backend" };
+    return { keyring: null, reason: "forced_session_backend" };
   }
-  const keytar = await tryImportKeytar();
-  if (keytar) {
-    return { keytar, reason: null };
+  const keyring = await tryImportKeyring();
+  if (keyring) {
+    return { keyring, reason: null };
   }
-  return { keytar: null, reason: "keytar module is unavailable on this machine" };
+  return { keyring: null, reason: "keyring module is unavailable on this machine" };
 }
 
 function parseCredentialFile(): { token: string; accountType: AccountType } {
@@ -110,14 +168,14 @@ function canUsePlaintextFallback(): boolean {
   return process.stdin.isTTY || process.env.COPILLM_ALLOW_PLAINTEXT_CREDENTIALS === "1";
 }
 
-function isMissingKeytarError(error: unknown): boolean {
+function isMissingKeyringError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
   }
   const message = error.message.toLowerCase();
   return (
-    message.includes("cannot find package 'keytar'") ||
-    message.includes("cannot find module 'keytar'") ||
+    message.includes("cannot find package '@napi-rs/keyring") ||
+    message.includes("cannot find module '@napi-rs/keyring") ||
     message.includes("module not found")
   );
 }
@@ -135,14 +193,14 @@ export async function inspectStoredCredential(): Promise<{ stored: boolean; back
   if (fs.existsSync(credentialsReadPath())) {
     return { stored: true, backend: "file" };
   }
-  const { keytar } = await resolveKeytar();
-  if (!keytar) {
+  const { keyring } = await resolveKeyring();
+  if (!keyring) {
     return { stored: false, backend: null };
   }
   try {
-    const token = await keytar.getPassword(SERVICE, ACCOUNT);
+    const token = await keyring.getPassword(SERVICE, ACCOUNT);
     if (token) {
-      return { stored: true, backend: "keytar" };
+      return { stored: true, backend: "keyring" };
     }
     return { stored: false, backend: null };
   } catch (error) {
@@ -162,14 +220,14 @@ export async function loadStoredCredential(): Promise<null | { token: string; ac
     return { token: parsed.token, accountType: parsed.accountType, source: "file" };
   }
 
-  const { keytar } = await resolveKeytar();
-  if (!keytar) {
+  const { keyring } = await resolveKeyring();
+  if (!keyring) {
     return null;
   }
 
   let token: null | string;
   try {
-    token = await keytar.getPassword(SERVICE, ACCOUNT);
+    token = await keyring.getPassword(SERVICE, ACCOUNT);
   } catch (error) {
     if (error instanceof Error) {
       throw new Error(`Failed to read token from OS keychain: ${error.message}`);
@@ -179,7 +237,7 @@ export async function loadStoredCredential(): Promise<null | { token: string; ac
   if (!token) {
     return null;
   }
-  return { token, accountType: "individual", source: "keytar" };
+  return { token, accountType: "individual", source: "keyring" };
 }
 
 export async function saveStoredCredential(
@@ -200,11 +258,11 @@ export async function saveStoredCredential(
     return "file";
   }
 
-  const { keytar, reason } = await resolveKeytar();
-  if (keytar) {
+  const { keyring, reason } = await resolveKeyring();
+  if (keyring) {
     try {
-      await keytar.setPassword(SERVICE, ACCOUNT, token);
-      return "keytar";
+      await keyring.setPassword(SERVICE, ACCOUNT, token);
+      return "keyring";
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Failed to write token to OS keychain: ${error.message}`);
@@ -237,11 +295,11 @@ export async function clearStoredCredential(): Promise<{ backend: CredentialBack
     return { backend: "file", removed: true };
   }
 
-  const { keytar, reason } = await resolveKeytar();
-  if (keytar) {
+  const { keyring, reason } = await resolveKeyring();
+  if (keyring) {
     try {
-      const removed = await keytar.deletePassword(SERVICE, ACCOUNT);
-      return { backend: "keytar", removed: removed || hadSession };
+      const removed = await keyring.deletePassword(SERVICE, ACCOUNT);
+      return { backend: "keyring", removed: removed || hadSession };
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Failed to clear token from OS keychain: ${error.message}`);

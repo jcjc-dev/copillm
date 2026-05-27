@@ -3,13 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Default mock: keytar exists but exposes no callable backend. credentials.ts
-// will cast `mod.default` as KeytarLike, get `null`, and fall through to the
+// Default mock: keyring exists but exposes no callable backend. credentials.ts
+// inspects the import for a callable getPassword and falls through to the
 // "unavailable" path — matching real-world behaviour on machines without a
 // usable keychain backend. Returning a stub object (rather than throwing in
 // the factory) keeps vitest's hoisting happy and avoids the wrapped-error
-// pattern that confuses isMissingKeytarError.
-vi.mock("keytar", () => ({ default: null }));
+// pattern that confuses isMissingKeyringError.
+vi.mock("@napi-rs/keyring", () => ({ AsyncEntry: null, default: null }));
 
 let tmpHome: string;
 let originalHome: string | undefined;
@@ -50,7 +50,7 @@ afterEach(() => {
 });
 
 describe("inspectStoredCredential", () => {
-  it("reports stored: false when nothing is configured (no keytar, no file)", async () => {
+  it("reports stored: false when nothing is configured (no keyring, no file)", async () => {
     const { inspectStoredCredential } = await import("../src/auth/credentials.js");
     const result = await inspectStoredCredential();
     expect(result).toEqual({ stored: false, backend: null });
