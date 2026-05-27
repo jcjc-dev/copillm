@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { setTimeout as sleep } from "node:timers/promises";
 import { Command } from "commander";
 import { clearStoredCredential, inspectStoredCredential, loadStoredCredential, saveStoredCredential, type CredentialBackend } from "./auth/credentials.js";
@@ -45,7 +46,14 @@ import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
 const logger = createLogger();
 const program = new Command();
 
-program.name("copillm").description("Local Copilot proxy").version("0.1.0");
+// Resolve the package version from package.json at runtime so `--version` stays
+// in sync with whatever was published. Using createRequire keeps this working
+// under NodeNext ESM without needing an import-assertion syntax flag, and
+// resolves the same file in both `dist/cli.js` (one level deep) and `src/cli.ts`
+// when invoked via tsx.
+const pkgVersion = (createRequire(import.meta.url)("../package.json") as { version: string }).version;
+
+program.name("copillm").description("Local Copilot proxy").version(pkgVersion);
 program.enablePositionalOptions();
 program.option("--debug", "Enable copillm debug mode (debug endpoint plus verbose daemon diagnostics)");
 
