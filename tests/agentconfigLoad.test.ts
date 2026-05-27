@@ -176,6 +176,55 @@ body = "project"
 `);
     expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.instructions?.body).toBe("project");
   });
+
+  describe("yolo merge", () => {
+    it("returns null yolo when no layer declares the block", () => {
+      writeGlobal(`active_profile = "default"\n[profiles.default]\n`);
+      expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.yolo).toBeNull();
+    });
+
+    it("merges defaults + profile with profile winning on enabled", () => {
+      writeGlobal(`
+active_profile = "work"
+[defaults.yolo]
+enabled = false
+[defaults.yolo.agents]
+claude = true
+codex = true
+[profiles.work.yolo]
+enabled = true
+[profiles.work.yolo.agents]
+claude = false
+`);
+      const y = loadAgentConfig({ cwd: tmpCwd })?.resolved.yolo;
+      expect(y).toEqual({ enabled: true, agents: { claude: false, codex: true } });
+    });
+
+    it("project overlay overrides global per-agent", () => {
+      writeGlobal(`
+active_profile = "default"
+[profiles.default.yolo.agents]
+claude = true
+`);
+      writeProject(`
+[profiles.default.yolo.agents]
+claude = false
+codex = true
+`);
+      expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.yolo).toEqual({
+        agents: { claude: false, codex: true }
+      });
+    });
+
+    it("rejects unknown agent keys in yolo.agents", () => {
+      writeGlobal(`
+active_profile = "default"
+[profiles.default.yolo.agents]
+gemini = true
+`);
+      expect(() => loadAgentConfig({ cwd: tmpCwd })).toThrow(/schema/);
+    });
+  });
 });
 
 describe("expandString", () => {

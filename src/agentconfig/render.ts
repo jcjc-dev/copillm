@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { AgentConfigError, type LoadResult } from "./load.js";
-import type { McpServerEntry, ResolvedProfile } from "./schema.js";
+import type { McpServerEntry, ResolvedProfile, YoloConfig } from "./schema.js";
 import { getCopillmHome } from "../config/home.js";
 import {
   HASH_COMMENT,
@@ -513,6 +513,8 @@ export interface ApplyResult {
   cliArgs: string[];
   notes: string[];
   sources: LoadResult["sources"];
+  /** Merged yolo block from the resolved profile, or null if no config. */
+  yolo: YoloConfig | null;
 }
 
 export function planRender(opts: ApplyOptions, load: LoadResult): RenderResult {
