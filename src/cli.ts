@@ -38,6 +38,7 @@ import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle, type Claud
 import { launchAgent } from "./cli/launchAgent.js";
 import type { AgentName } from "./integrations/registry.js";
 import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
+import { applyYolo, resolveYolo } from "./agents/registry.js";
 import { registerConfigCommands } from "./cli/configCommands.js";
 import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
 
@@ -754,6 +755,7 @@ program
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
   .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
   .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
+  .option("--yolo", "Skip approvals/sandbox (injects --dangerously-bypass-approvals-and-sandbox). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
@@ -761,7 +763,7 @@ program
   .action(
     async (
       forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
     ) => {
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
@@ -783,9 +785,11 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
+      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const args = applyYolo({ agent: "codex", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
       const exitCode = await launchAgent({
         agent: "codex",
-        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        args,
         env,
         pinnedSpec
       });
@@ -800,6 +804,7 @@ program
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
   .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
   .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
+  .option("--yolo", "Skip permission prompts (injects --dangerously-skip-permissions). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
@@ -807,7 +812,7 @@ program
   .action(
     async (
       forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
     ) => {
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
@@ -828,9 +833,11 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...claude.bundle.env, ...applyResult.envOverlay };
+      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const args = applyYolo({ agent: "claude", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
       const exitCode = await launchAgent({
         agent: "claude",
-        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        args,
         env,
         pinnedSpec
       });
@@ -845,6 +852,7 @@ program
   .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
   .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
   .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
+  .option("--yolo", "Skip approvals if supported (pi has no equivalent; emits a warning). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
@@ -852,7 +860,7 @@ program
   .action(
     async (
       forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean }
+      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
     ) => {
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
@@ -873,9 +881,11 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
+      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const args = applyYolo({ agent: "pi", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
       const exitCode = await launchAgent({
         agent: "pi",
-        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        args,
         env,
         pinnedSpec
       });
@@ -889,6 +899,7 @@ program
   .option("--copillm-use <spec>", "Pin copilot package version (e.g. 1.0.52 or @github/copilot@1.0.52)")
   .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
   .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
+  .option("--yolo", "Allow all tools/paths/URLs (injects --allow-all). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
   .passThroughOptions()
   .helpOption(false)
@@ -896,7 +907,7 @@ program
   .action(
     async (
       forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmProfile?: string; copillmNoConfig?: boolean }
+      opts: { copillmUse?: string; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
     ) => {
       const credential = await loadStoredCredential();
       if (!credential) {
@@ -924,9 +935,11 @@ program
         ...applyResult.envOverlay,
         COPILOT_GITHUB_TOKEN: credential.token
       };
+      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const args = applyYolo({ agent: "copilot", userArgs: baseArgs, yolo: resolveYolo(opts.yolo) });
       const exitCode = await launchAgent({
         agent: "copilot",
-        args: [...(forwardedArgs ?? []), ...applyResult.cliArgs],
+        args,
         env,
         pinnedSpec
       });
