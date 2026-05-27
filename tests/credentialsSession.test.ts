@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-vi.mock("keytar", () => ({ default: null }));
+vi.mock("@napi-rs/keyring", () => ({ AsyncEntry: null, default: null }));
 
 let tmpHome: string;
 let originalHome: string | undefined;

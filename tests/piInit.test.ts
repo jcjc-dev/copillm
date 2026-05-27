@@ -3,9 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-// Keytar is never available in CI; force the keytar-import path to no-op so we
-// don't probe the system keychain when loadStoredCredential is hit indirectly.
-vi.mock("keytar", () => ({ default: null }));
+// The OS keyring is never available in CI; force the keyring-import path to
+// no-op so we don't probe the system keychain when loadStoredCredential is hit
+// indirectly.
+vi.mock("@napi-rs/keyring", () => ({ AsyncEntry: null, default: null }));
 
 // Mock the credential loader so the test does not require real GitHub auth.
 vi.mock("../src/auth/credentials.js", () => ({
