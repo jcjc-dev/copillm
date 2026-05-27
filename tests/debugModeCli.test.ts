@@ -65,9 +65,19 @@ describe("global copillm --debug", () => {
     const debugBody = (await debugResponse.json()) as {
       debug_enabled?: boolean;
       server?: { log_level?: string; log_file?: string | null };
+      user?: Record<string, unknown> | null;
     };
     expect(debugBody.debug_enabled).toBe(true);
     expect(debugBody.server?.log_level).toBe("debug");
+
+    // PII guard: /_debug should only expose login/id/type from the GitHub user
+    // summary. The mock backend's fixtureUserPayload returns name, email,
+    // avatar_url, html_url, and plan — none of those may leak through.
+    expect(debugBody.user).toBeTruthy();
+    expect(Object.keys(debugBody.user ?? {}).sort()).toEqual(["id", "login", "type"]);
+    for (const forbidden of ["name", "email", "avatar_url", "html_url", "plan_name", "plan"]) {
+      expect(debugBody.user).not.toHaveProperty(forbidden);
+    }
 
     const capturePath = path.join(seeded.copillmHome, "claude-argv.json");
     shimDir = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-debug-shim-"));
