@@ -38,6 +38,7 @@ copillm login
 # necessary, and configures the required environment variables.
 copillm claude
 copillm codex
+copillm copilot   # GitHub Copilot CLI, signed in with copillm's token
 ```
 
 Arguments after the agent name are forwarded to the underlying CLI:

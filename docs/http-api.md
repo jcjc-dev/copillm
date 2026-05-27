@@ -68,6 +68,38 @@ msg = client.messages.create(
 print(msg.content[0].text)
 ```
 
+## Error handling
+
+When an upstream Copilot API call fails, copillm forwards the upstream HTTP status code through to the caller and returns a sanitized error payload — agents see a real error code instead of a generic `502 proxy_error`. Auth tokens, headers, and request bodies are never echoed back in the response.
+
+OpenAI-shaped routes (`/v1/chat/completions`, `/codex/v1/responses`) return:
+
+```json
+{
+  "error": {
+    "type": "upstream_rate_limited",
+    "code": "rate_limit_exceeded",
+    "message": "upstream_rate_limited: rate_limit_exceeded: ...",
+    "upstream_status_code": 429,
+    "request_id": "..."
+  }
+}
+```
+
+Anthropic-shaped routes (`/v1/messages`, `/anthropic/v1/messages`) return the same fields under `{"type": "error", "error": {...}}`. Streaming Anthropic responses surface the failure via an SSE `error` event.
+
+`type` and `code` come from the upstream body when available; otherwise they fall back to the copillm error category. Categories the daemon emits today:
+
+| Category | Conditions |
+|---|---|
+| `upstream_auth_error` | Upstream returned `401` or `403`. |
+| `upstream_rate_limited` | Upstream returned `429`. |
+| `upstream_server_error` | Upstream returned `5xx`. |
+| `upstream_request_error` | Upstream returned `4xx` (other than the above). |
+| `upstream_error` | Any other non-2xx response. |
+
+Transport-level failures *inside* the daemon (a panic, malformed upstream stream, or a daemon-side bug) still surface as `502` with `{ "error": "<kind>", "detail": "..." }`. If you see `proxy_error` from a coding-agent error message, that is the daemon itself failing, not Copilot upstream.
+
 ## Translation caveats
 
 copillm translates between OpenAI and Anthropic wire formats and Copilot's upstream. Current behavior:
