@@ -3,11 +3,6 @@ name: PR gate
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - ".github/copilot-instructions.md"
-      - ".github/rulesets/**"
-      - "**.md"
   push:
     branches: [main]
   workflow_dispatch:
