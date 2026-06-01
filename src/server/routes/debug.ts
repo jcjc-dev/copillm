@@ -1,0 +1,79 @@
+import type { ServerResponse } from "node:http";
+import type { Logger } from "pino";
+import type { AppConfig } from "../../types/index.js";
+import type { CopilotTokenManager } from "../../auth/copilotToken.js";
+import { getGithubUserSummary, GithubUserFetchError } from "../debugInfo.js";
+import { safeSendJson } from "../requestLifecycle.js";
+
+const DAEMON_STARTED_AT_ISO = new Date().toISOString();
+
+export async function handleDebug(
+  res: ServerResponse,
+  input: {
+    config: AppConfig;
+    logger: Logger;
+    tokenManager: CopilotTokenManager;
+    githubToken?: string;
+    port: number;
+  }
+): Promise<void> {
+  const bearerTtlSeconds = input.tokenManager.expiresInSeconds();
+  const uptimeSeconds = Math.max(0, Math.floor((Date.now() - Date.parse(DAEMON_STARTED_AT_ISO)) / 1_000));
+  let user: Record<string, unknown> | null = null;
+  let userError: string | null = null;
+
+  if (input.githubToken) {
+    try {
+      const summary = await getGithubUserSummary(input.githubToken);
+      user = {
+        login: summary.login,
+        id: summary.id,
+        type: summary.type
+      };
+    } catch (error) {
+      if (error instanceof GithubUserFetchError) {
+        userError = `github_user_lookup_failed_${error.status}`;
+      } else {
+        userError = error instanceof Error ? error.message : "unknown_error";
+      }
+    }
+  } else {
+    userError = "github_token_unavailable_in_proxy";
+  }
+
+  safeSendJson(res, 200, {
+    server: {
+      port: input.port,
+      pid: process.pid,
+      node_version: process.version,
+      started_at_iso: DAEMON_STARTED_AT_ISO,
+      uptime_seconds: uptimeSeconds,
+      account_type: input.config.accountType,
+      selected_models: input.config.selectedModels,
+      require_caller_secret: input.config.requireCallerSecret,
+      log_level: input.logger.level,
+      log_file: process.env.COPILLM_LOG_FILE ?? null
+    },
+    auth: {
+      bearer_ttl_seconds: bearerTtlSeconds,
+      bearer_present: input.tokenManager.current !== null,
+      bearer_expires_at_unix: input.tokenManager.current?.expiresAtUnix ?? null
+    },
+    user,
+    user_error: userError,
+    routes: [
+      "GET /livez",
+      "GET /healthz",
+      "GET /models",
+      "GET /v1/models",
+      "GET /codex/v1/models",
+      "GET /anthropic/v1/models",
+      "POST /codex/v1/responses",
+      "POST /v1/chat/completions",
+      "POST /v1/messages",
+      "POST /anthropic/v1/messages",
+      "GET /_debug"
+    ],
+    debug_enabled: true
+  });
+}
