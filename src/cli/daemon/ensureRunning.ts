@@ -7,6 +7,7 @@ import { displayHomePath } from "../integrations/banner.js";
 import { isPidAlive } from "./lifecycle.js";
 import { readLiveLock, waitForDaemonReady, warnIfDebugRequestedButInactive } from "./probes.js";
 import { daemonSpawnEnv } from "./spawnEnv.js";
+import { buildSelfSpawnCommand } from "./selfSpawn.js";
 
 export async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): Promise<LockFileData> {
   const live = await readLiveLock();
@@ -30,9 +31,8 @@ export async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): 
       ? `Starting copillm in background with debug logging at ${displayHomePath(debugLog)}...\n`
       : `Starting copillm in background...\n`
   );
-  const daemonArgs = [process.argv[1], "daemon"];
-  if (opts.debug) daemonArgs.push("--debug");
-  const child = spawn(process.execPath, daemonArgs, {
+  const daemonCommand = buildSelfSpawnCommand("daemon", opts.debug ? ["--debug"] : []);
+  const child = spawn(daemonCommand.command, daemonCommand.args, {
     detached: true,
     stdio: ["ignore", "ignore", "pipe"],
     env: daemonSpawnEnv(opts.debug)

@@ -2,11 +2,10 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { fallbackPackageInfo } from "../../../src/cli/packageInfo.js";
 
 // Regression guard for the bug where program.version was hardcoded to "0.1.0"
-// and silently drifted from package.json across releases (see fix in
-// src/cli.ts that uses createRequire(import.meta.url) to resolve the version
-// at runtime). If anyone reverts to a string literal, this test fails.
+// and silently drifted from package.json across releases.
 describe("copillm --version", () => {
   it("matches the version field in package.json", () => {
     const repoRoot = path.resolve(__dirname, "..", "..", "..");
@@ -25,5 +24,18 @@ describe("copillm --version", () => {
     expect(result.error, result.error?.message).toBeUndefined();
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout.trim()).toBe(pkg.version);
+  });
+
+  it("keeps standalone fallback package metadata in sync", () => {
+    const repoRoot = path.resolve(__dirname, "..", "..", "..");
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as {
+      name: string;
+      version: string;
+    };
+
+    expect(fallbackPackageInfo()).toEqual({
+      name: pkg.name,
+      version: pkg.version
+    });
   });
 });
