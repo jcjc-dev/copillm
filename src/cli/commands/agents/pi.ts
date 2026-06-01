@@ -1,0 +1,51 @@
+import type { Command } from "commander";
+import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.js";
+import { buildPiEnvBundle } from "../../agentEnv.js";
+import { processCopillmArgs } from "../../copillmFlags.js";
+import { ensureDaemonRunningForLauncher } from "../../daemon/ensureRunning.js";
+import { launchAgent } from "../../launchAgent.js";
+import { refreshPiHome } from "../../integrations/refreshPi.js";
+import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
+import { applyYoloForLaunch } from "./shared.js";
+
+export function register(program: Command): void {
+  program
+    .command("pi")
+    .description("Launch pi coding agent against copillm (auto-starts daemon, downloads pi if missing)")
+    .allowUnknownOption(true)
+    .helpOption(false)
+    .argument("[args...]", "Args forwarded to pi")
+    .action(
+      async (forwardedArgs: string[]) => {
+        const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
+        const debug = resolveCopillmDebug(opts.copillmDebug);
+        enableRuntimeDebug(debug);
+        const lock = await ensureDaemonRunningForLauncher({ debug });
+        const pi = await refreshPiHome(lock.port);
+        if (!pi) {
+          throw new Error("Failed to prepare pi models.json (see warning above).");
+        }
+        const bundle = buildPiEnvBundle(pi.outDir);
+        const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_PI_VERSION ?? undefined;
+        const applyResult = applyAgentConfig({
+          agent: "pi",
+          cwd: process.cwd(),
+          profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+          skip: Boolean(opts.copillmNoConfig)
+        });
+        for (const line of formatApplyNotes(applyResult, "pi")) {
+          process.stderr.write(`${line}\n`);
+        }
+        const env = { ...bundle.env, ...applyResult.envOverlay };
+        const baseArgs = [...forwarded, ...applyResult.cliArgs];
+        const args = applyYoloForLaunch({ agent: "pi", flag: opts.yolo, applyResult, baseArgs });
+        const exitCode = await launchAgent({
+          agent: "pi",
+          args,
+          env,
+          pinnedSpec
+        });
+        process.exit(exitCode);
+      }
+    );
+}
