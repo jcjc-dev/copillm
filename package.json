@@ -26,7 +26,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/cli.ts",
-    "lint": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
+    "lint": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit && eslint src",
+    "lint:boundaries": "eslint src",
     "test": "vitest run",
     "test:e2e:pr": "npm run build && tsx tests/e2e/pr-gate-runner.ts",
     "test:e2e:release": "npm run build && tsx tests/e2e/release-runner.ts",
@@ -44,6 +45,10 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@typescript-eslint/parser": "^8.60.0",
+    "eslint": "^10.4.1",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-boundaries": "^6.0.2",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2",
     "vitest": "^2.1.2"
