@@ -59,6 +59,12 @@ Probe the daemon's `/health` endpoint and report the result. Useful in scripts t
 copillm health [--json]
 ```
 
+## Troubleshooting
+
+**Upstream errors reach the agent verbatim.** When Copilot upstream returns a non-2xx response (rate limit, auth failure, server error), the daemon forwards the upstream HTTP status code and a sanitized error body to the calling agent instead of masking it as a generic proxy error. If your coding agent prints `upstream_rate_limited` / `upstream_auth_error` / `upstream_server_error`, the problem is on the Copilot side, not the daemon. See the [HTTP API error handling reference](../../http-api/#error-handling) for the response shape and the full category list.
+
+A generic `proxy_error` (HTTP `502`) means the daemon itself failed to talk to upstream — usually a transport-level issue. Re-run with `copillm --debug start` to capture the upstream interaction in `~/.copillm/debug.log`.
+
 ## Related environment variables
 
 | Variable | Purpose |
