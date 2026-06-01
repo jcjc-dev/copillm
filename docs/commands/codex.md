@@ -13,18 +13,31 @@ Launch Codex CLI, fully wired against the local copillm daemon.
 copillm [--debug] codex [args...]
 ```
 
-Any arguments after `codex` are forwarded verbatim to the underlying Codex CLI.
+Any arguments after `codex` are forwarded verbatim to the underlying Codex CLI — **except** for copillm-owned flags, which copillm consumes regardless of position.
 
 ```bash
 copillm codex --model gpt-5
 copillm codex --help
 ```
 
-Use the global debug flag to debug copillm itself without stealing flags from Codex:
+## Copillm-owned flags
+
+Copillm reserves a small set of flags. Each has a long canonical form (`--copillm-*`) and a short alias. **Copillm consumes both forms before the agent sees them**, even if Codex would otherwise define the same short flag (e.g. Codex's own `--profile`).
+
+| Short | Long (canonical) | Description |
+| --- | --- | --- |
+| `--profile <name>` | `--copillm-profile <name>` | Override the active profile from `~/.copillm/agent.toml` for this launch. |
+| `--use <spec>` | `--copillm-use <spec>` | Pin the Codex CLI version (e.g. `1.4.7` or `@openai/codex@1.4.7`). |
+| `--debug` | `--copillm-debug` | Enable debug endpoints when auto-starting the daemon. |
+| `--no-config` | `--copillm-no-config` | Skip `agent.toml` fan-out for this launch. |
+| `--yolo` | — | Skip approvals/sandbox (injects `--dangerously-bypass-approvals-and-sandbox`). Reads `COPILLM_YOLO`. |
+
+Examples:
 
 ```bash
-copillm --debug codex
-copillm --debug codex -- --debug  # also forwards --debug to Codex
+copillm codex --profile work         # uses copillm profile "work"
+copillm codex --yolo --debug         # yolo + copillm daemon diagnostics
+copillm --debug codex                # equivalent (global debug flag still works)
 ```
 
 ## What it does

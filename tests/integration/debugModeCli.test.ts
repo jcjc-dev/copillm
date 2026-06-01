@@ -43,7 +43,7 @@ afterEach(async () => {
 });
 
 describe("global copillm --debug", () => {
-  it("enables daemon diagnostics without swallowing agent --debug flags", async () => {
+  it("claims --debug (short alias of --copillm-debug) and does not forward it to the agent", async () => {
     mock = await startMockBackend();
     seeded = seedFreshHome();
     const port = await findFreePort();
@@ -99,7 +99,10 @@ describe("global copillm --debug", () => {
     expect(launched.status, launched.stderr).toBe(0);
 
     const capture = JSON.parse(fs.readFileSync(capturePath, "utf8")) as { argv: string[] };
-    expect(capture.argv).toContain("--debug");
+    // --debug is a copillm short alias for --copillm-debug; copillm consumes
+    // it (here, the trailing one passed after `claude`) and the agent never
+    // sees it. --probe is an unrelated agent flag and must still pass through.
+    expect(capture.argv).not.toContain("--debug");
     expect(capture.argv).toContain("--probe");
   });
 

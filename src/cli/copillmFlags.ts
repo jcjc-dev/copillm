@@ -27,6 +27,14 @@ export interface CopillmLaunchOpts {
 export interface CopillmFlagSpec {
   /** Canonical flag token, e.g. "--copillm-profile". */
   flag: string;
+  /**
+   * Short aliases that should be treated identically to `flag` and swallowed
+   * before the agent sees them. Deliberate design choice: copillm's flag wins
+   * over any same-named agent-native flag (e.g. codex's own `--profile`).
+   * Users get one mental model — `copillm <agent> --profile work` always
+   * means copillm's profile — and the agent never receives the alias token.
+   */
+  aliases?: readonly string[];
   /** true: consumes the next token (or `=value`); false: boolean. */
   takesValue: boolean;
   /** Where the parsed value lands on CopillmLaunchOpts. */
@@ -46,6 +54,7 @@ export interface CopillmFlagSpec {
 export const COPILLM_FLAGS: CopillmFlagSpec[] = [
   {
     flag: "--copillm-use",
+    aliases: ["--use"],
     takesValue: true,
     dest: "copillmUse",
     kind: "swallow",
@@ -53,6 +62,7 @@ export const COPILLM_FLAGS: CopillmFlagSpec[] = [
   },
   {
     flag: "--copillm-debug",
+    aliases: ["--debug"],
     takesValue: false,
     dest: "copillmDebug",
     kind: "swallow",
@@ -60,6 +70,7 @@ export const COPILLM_FLAGS: CopillmFlagSpec[] = [
   },
   {
     flag: "--copillm-profile",
+    aliases: ["--profile"],
     takesValue: true,
     dest: "copillmProfile",
     kind: "swallow",
@@ -67,6 +78,7 @@ export const COPILLM_FLAGS: CopillmFlagSpec[] = [
   },
   {
     flag: "--copillm-no-config",
+    aliases: ["--no-config"],
     takesValue: false,
     dest: "copillmNoConfig",
     kind: "swallow",
@@ -87,7 +99,13 @@ export interface ProcessResult {
   forwarded: string[];
 }
 
-const SPEC_BY_FLAG = new Map(COPILLM_FLAGS.map((spec) => [spec.flag, spec]));
+const SPEC_BY_FLAG = new Map<string, CopillmFlagSpec>();
+for (const spec of COPILLM_FLAGS) {
+  SPEC_BY_FLAG.set(spec.flag, spec);
+  for (const alias of spec.aliases ?? []) {
+    SPEC_BY_FLAG.set(alias, spec);
+  }
+}
 
 /**
  * Extract copillm-owned flags from a raw arg tail, returning the parsed opts
