@@ -42,6 +42,7 @@ import { applyAgentConfig, formatApplyNotes } from "./agentconfig/apply.js";
 import type { ApplyResult } from "./agentconfig/render.js";
 import { applyYolo, resolveYoloWithSource } from "./agents/registry.js";
 import { registerConfigCommands } from "./cli/configCommands.js";
+import { processCopillmArgs } from "./cli/copillmFlags.js";
 import { installProcessSafetyNet } from "./cli/processSafetyNet.js";
 
 const logger = createLogger();
@@ -802,20 +803,12 @@ function applyYoloForLaunch(params: {
 program
   .command("codex")
   .description("Launch Codex CLI against copillm (auto-starts daemon, downloads codex if missing)")
-  .option("--copillm-use <spec>", "Pin codex package version (e.g. 1.4.7 or @openai/codex@1.4.7)")
-  .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
-  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
-  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
-  .option("--yolo", "Skip approvals/sandbox (injects --dangerously-bypass-approvals-and-sandbox). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
-  .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to codex")
   .action(
-    async (
-      forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
-    ) => {
+    async (forwardedArgs: string[]) => {
+      const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
       const lock = await ensureDaemonRunningForLauncher({ debug });
@@ -836,7 +829,7 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
-      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const baseArgs = [...forwarded, ...applyResult.cliArgs];
       const args = applyYoloForLaunch({ agent: "codex", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "codex",
@@ -851,20 +844,12 @@ program
 program
   .command("claude")
   .description("Launch Claude Code against copillm (auto-starts daemon, downloads claude if missing)")
-  .option("--copillm-use <spec>", "Pin claude package version (e.g. 1.0.0 or @anthropic-ai/claude-code@1.0.0)")
-  .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
-  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
-  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
-  .option("--yolo", "Skip permission prompts (injects --dangerously-skip-permissions). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
-  .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to claude")
   .action(
-    async (
-      forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
-    ) => {
+    async (forwardedArgs: string[]) => {
+      const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
       const lock = await ensureDaemonRunningForLauncher({ debug });
@@ -884,7 +869,7 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...claude.bundle.env, ...applyResult.envOverlay };
-      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const baseArgs = [...forwarded, ...applyResult.cliArgs];
       const args = applyYoloForLaunch({ agent: "claude", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "claude",
@@ -899,20 +884,12 @@ program
 program
   .command("pi")
   .description("Launch pi coding agent against copillm (auto-starts daemon, downloads pi if missing)")
-  .option("--copillm-use <spec>", "Pin pi package version (e.g. 0.75.4 or @earendil-works/pi-coding-agent@0.75.4)")
-  .option("--copillm-debug", "Enable debug endpoints when auto-starting daemon")
-  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
-  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
-  .option("--yolo", "Skip approvals if supported (pi has no equivalent; emits a warning). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
-  .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to pi")
   .action(
-    async (
-      forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmDebug?: boolean; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
-    ) => {
+    async (forwardedArgs: string[]) => {
+      const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
       const debug = resolveCopillmDebug(opts.copillmDebug);
       enableRuntimeDebug(debug);
       const lock = await ensureDaemonRunningForLauncher({ debug });
@@ -932,7 +909,7 @@ program
         process.stderr.write(`${line}\n`);
       }
       const env = { ...bundle.env, ...applyResult.envOverlay };
-      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const baseArgs = [...forwarded, ...applyResult.cliArgs];
       const args = applyYoloForLaunch({ agent: "pi", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "pi",
@@ -947,19 +924,12 @@ program
 program
   .command("copilot")
   .description("Launch GitHub Copilot CLI reusing copillm's stored GitHub token (no second device flow)")
-  .option("--copillm-use <spec>", "Pin copilot package version (e.g. 1.0.52 or @github/copilot@1.0.52)")
-  .option("--copillm-profile <name>", "Override active profile from ~/.copillm/agent.toml for this launch")
-  .option("--copillm-no-config", "Skip agent.toml fan-out for this launch", false)
-  .option("--yolo", "Allow all tools/paths/URLs (injects --allow-all). Env: COPILLM_YOLO")
   .allowUnknownOption(true)
-  .passThroughOptions()
   .helpOption(false)
   .argument("[args...]", "Args forwarded to copilot")
   .action(
-    async (
-      forwardedArgs: string[],
-      opts: { copillmUse?: string; copillmProfile?: string; copillmNoConfig?: boolean; yolo?: boolean }
-    ) => {
+    async (forwardedArgs: string[]) => {
+      const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
       const credential = await loadStoredCredential();
       if (!credential) {
         process.stderr.write(
@@ -986,7 +956,7 @@ program
         ...applyResult.envOverlay,
         COPILOT_GITHUB_TOKEN: credential.token
       };
-      const baseArgs = [...(forwardedArgs ?? []), ...applyResult.cliArgs];
+      const baseArgs = [...forwarded, ...applyResult.cliArgs];
       const args = applyYoloForLaunch({ agent: "copilot", flag: opts.yolo, applyResult, baseArgs });
       const exitCode = await launchAgent({
         agent: "copilot",
