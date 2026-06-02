@@ -406,6 +406,8 @@ async function runLauncherScenarios(
           ...mockEnv,
           ...extraEnv,
           COPILLM_HOME: seeded.copillmHome,
+          // PATH lookup is opt-in now; this scenario exercises that legacy path.
+          COPILLM_USE_SYSTEM_AGENT: "1",
           PATH: `${stub.binDir}${path.delimiter}${process.env.PATH ?? ""}`
         });
         assertEquals(out.status, 0, `launcher ${agent} (system PATH) should exit 0; stderr=${out.stderr}`);

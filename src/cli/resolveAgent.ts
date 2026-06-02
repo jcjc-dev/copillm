@@ -72,8 +72,12 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const binName = AGENT_REGISTRY[agent].binName;
   const agentRoot = path.join(cacheRoot, agent);
 
-  // 1. PATH lookup (skipped when user pinned a specific version)
-  if (!pin.version && opts.preferPath !== false) {
+  // 1. PATH lookup (opt-in only).
+  // PATH lookup is OFF by default so the running agent version is always the one copillm
+  // manages in its cache. Users who want to fall back to a system-installed binary can opt
+  // in via the COPILLM_USE_SYSTEM_AGENT env var (wired in launchAgent.ts) or by passing
+  // `preferPath: true` directly. Pinned versions always skip this branch.
+  if (!pin.version && opts.preferPath === true) {
     const found = findOnPath(binName);
     if (found) {
       const v = probeVersion(found) ?? "unknown";
