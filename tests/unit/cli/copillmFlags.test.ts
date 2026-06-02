@@ -93,4 +93,81 @@ describe("processCopillmArgs", () => {
     processCopillmArgs(input);
     expect(input).toEqual(copy);
   });
+
+  describe("short aliases", () => {
+    it("accepts --profile as an alias for --copillm-profile and swallows it", () => {
+      const { opts, forwarded } = processCopillmArgs(["--profile", "work", "chat"]);
+      expect(opts.copillmProfile).toBe("work");
+      expect(forwarded).toEqual(["chat"]);
+    });
+
+    it("accepts --use as an alias for --copillm-use", () => {
+      const { opts, forwarded } = processCopillmArgs([
+        "--use",
+        "@openai/codex@1.4.7",
+        "chat"
+      ]);
+      expect(opts.copillmUse).toBe("@openai/codex@1.4.7");
+      expect(forwarded).toEqual(["chat"]);
+    });
+
+    it("accepts --debug as an alias for --copillm-debug (boolean)", () => {
+      const { opts, forwarded } = processCopillmArgs(["--debug", "chat"]);
+      expect(opts.copillmDebug).toBe(true);
+      expect(forwarded).toEqual(["chat"]);
+    });
+
+    it("accepts --no-config as an alias for --copillm-no-config (boolean)", () => {
+      const { opts, forwarded } = processCopillmArgs(["--no-config", "chat"]);
+      expect(opts.copillmNoConfig).toBe(true);
+      expect(forwarded).toEqual(["chat"]);
+    });
+
+    it("accepts --profile=value form on the alias", () => {
+      const { opts, forwarded } = processCopillmArgs(["--profile=work", "chat"]);
+      expect(opts.copillmProfile).toBe("work");
+      expect(forwarded).toEqual(["chat"]);
+    });
+
+    it("alias wins over agent-native flag of the same name (--profile is always copillm's)", () => {
+      // The whole point of the alias: even if codex/claude define their own
+      // --profile, copillm consumes it first so users get a single mental model.
+      const { opts, forwarded } = processCopillmArgs([
+        "--profile",
+        "work",
+        "--dangerously-skip-permissions"
+      ]);
+      expect(opts.copillmProfile).toBe("work");
+      expect(forwarded).toEqual(["--dangerously-skip-permissions"]);
+    });
+
+    it("canonical and alias are interchangeable; last wins on repeat", () => {
+      const { opts } = processCopillmArgs([
+        "--copillm-profile",
+        "first",
+        "--profile",
+        "second"
+      ]);
+      expect(opts.copillmProfile).toBe("second");
+    });
+
+    it("throws when an alias value flag is missing its value", () => {
+      expect(() => processCopillmArgs(["--profile"])).toThrow(
+        "--copillm-profile requires a value"
+      );
+    });
+
+    it("the original bug case using the short alias also works", () => {
+      // `copillm claude --yolo --profile work` — the exact form the user
+      // tried that motivated this feature.
+      const { opts, forwarded } = processCopillmArgs([
+        "--yolo",
+        "--profile",
+        "work"
+      ]);
+      expect(opts.yolo).toBe(true);
+      expect(opts.copillmProfile).toBe("work");
+      expect(forwarded).toEqual([]);
+    });
+  });
 });

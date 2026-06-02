@@ -13,18 +13,31 @@ Launch Claude Code, fully wired against the local copillm daemon.
 copillm [--debug] claude [args...]
 ```
 
-Any arguments after `claude` are forwarded verbatim to the underlying Claude Code CLI.
+Any arguments after `claude` are forwarded verbatim to the underlying Claude Code CLI — **except** for copillm-owned flags, which copillm consumes regardless of position.
 
 ```bash
 copillm claude --model opus
 copillm claude --help
 ```
 
-Use the global debug flag to debug copillm itself without stealing flags from Claude Code:
+## Copillm-owned flags
+
+Copillm reserves a small set of flags. Each has a long canonical form (`--copillm-*`) and a short alias. **Copillm consumes both forms before the agent sees them**, even if Claude Code would otherwise define the same short flag.
+
+| Short | Long (canonical) | Description |
+| --- | --- | --- |
+| `--profile <name>` | `--copillm-profile <name>` | Override the active profile from `~/.copillm/agent.toml` for this launch. |
+| `--use <spec>` | `--copillm-use <spec>` | Pin the Claude Code version (e.g. `2.1.0` or `@anthropic-ai/claude-code@2.1.0`). |
+| `--debug` | `--copillm-debug` | Enable debug endpoints when auto-starting the daemon. |
+| `--no-config` | `--copillm-no-config` | Skip `agent.toml` fan-out for this launch. |
+| `--yolo` | — | Skip permission prompts (injects `--dangerously-skip-permissions`). Reads `COPILLM_YOLO`. |
+
+Examples:
 
 ```bash
-copillm --debug claude
-copillm --debug claude -- --debug  # also forwards --debug to Claude Code
+copillm claude --profile work        # uses copillm profile "work"
+copillm claude --yolo --debug        # yolo + copillm daemon diagnostics
+copillm --debug claude               # equivalent (global debug flag still works)
 ```
 
 ## What it does
