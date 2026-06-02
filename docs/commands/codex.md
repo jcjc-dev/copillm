@@ -45,9 +45,10 @@ copillm --debug codex                # equivalent (global debug flag still works
 1. Starts the copillm daemon in the background if it is not already running.
 2. Resolves the Codex CLI binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_CODEX_VERSION` environment variable
-   2. A system `codex` executable on `PATH`
-   3. A cached install at `~/.copillm/bin/codex/<version>/`
-   4. A fresh install via `npm install --prefix ~/.copillm/bin/codex/<version>/ @openai/codex@latest`
+   2. A cached install at `~/.copillm/bin/codex/<version>/`
+   3. A fresh install via `npm install --prefix ~/.copillm/bin/codex/<version>/ @openai/codex@latest`
+
+   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` to additionally consider a system `codex` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
 3. Prints the resolved binary path and version, for example:
    ```text
    → codex (cached, ~/.copillm/bin/codex/1.4.9/, v1.4.9)

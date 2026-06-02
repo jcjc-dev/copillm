@@ -15,7 +15,11 @@ export async function launchAgent(opts: LaunchOptions): Promise<number> {
 
   let resolved;
   try {
-    resolved = await resolveAgent(opts.agent, { pinnedSpec: opts.pinnedSpec, log });
+    resolved = await resolveAgent(opts.agent, {
+      pinnedSpec: opts.pinnedSpec,
+      preferPath: useSystemAgentOptIn(),
+      log
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log(message);
@@ -77,4 +81,18 @@ function installHint(agent: AgentName): string {
     "Hint: install Claude Code manually with:",
     "    npm i -g @anthropic-ai/claude-code"
   ].join("\n");
+}
+
+/**
+ * Whether the user has opted in to letting copillm fall back to a system-installed
+ * coding-agent binary on PATH. Off by default — copillm uses its own cache and
+ * downloads on demand so the executed version is deterministic.
+ *
+ * Opt in by setting `COPILLM_USE_SYSTEM_AGENT` to `1`, `true`, or `yes`
+ * (case-insensitive).
+ */
+function useSystemAgentOptIn(): boolean {
+  const raw = process.env.COPILLM_USE_SYSTEM_AGENT;
+  if (!raw) return false;
+  return /^(1|true|yes)$/i.test(raw.trim());
 }

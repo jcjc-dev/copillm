@@ -77,7 +77,7 @@ describe("packageNameFor / binNameFor", () => {
 describe("resolveAgent (path lookup)", async () => {
   const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
 
-  it("returns source=path when binary exists on PATH", async () => {
+  it("returns source=path when binary exists on PATH and preferPath is opted in", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-"));
     try {
       const binDir = path.join(tmp, "bin");
@@ -106,10 +106,55 @@ describe("resolveAgent (path lookup)", async () => {
           : path.join(binDir, "fakecmd");
         fs.renameSync(altSrc, path.join(binDir, altName));
 
-        const result = await resolveAgent("codex", { cacheRoot });
+        const result = await resolveAgent("codex", { cacheRoot, preferPath: true });
         expect(result.source).toBe("path");
         expect(result.binPath).toContain(binDir);
         expect(result.displayLine).toContain("system PATH");
+      } finally {
+        process.env.PATH = prevPath;
+      }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores binary on PATH by default and prefers the cached version", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-"));
+    try {
+      const binDir = path.join(tmp, "bin");
+      fs.mkdirSync(binDir, { recursive: true });
+
+      // Stage a fake "codex" on PATH that, if used, would resolve as source=path.
+      if (process.platform === "win32") {
+        const jsPath = path.join(binDir, "codex.js");
+        fs.writeFileSync(jsPath, `#!/usr/bin/env node\nconsole.log("0.0.1");\nprocess.exit(0);\n`);
+        fs.writeFileSync(path.join(binDir, "codex.cmd"), `@node "${jsPath}" %*\r\n`);
+      } else {
+        fs.writeFileSync(path.join(binDir, "codex"), `#!/bin/sh\necho 0.0.1\n`, { mode: 0o755 });
+      }
+
+      // Pre-populate the cache with a fake installed codex so the resolver picks it
+      // up via the "cached fallback" branch (no version pin, no network).
+      const cacheRoot = path.join(tmp, "cache");
+      const cachedVersionDir = path.join(cacheRoot, "codex", "9.9.9");
+      const cachedBinDir = path.join(cachedVersionDir, "node_modules", ".bin");
+      fs.mkdirSync(cachedBinDir, { recursive: true });
+      const cachedBinName = process.platform === "win32" ? "codex.cmd" : "codex";
+      const cachedBinPath = path.join(cachedBinDir, cachedBinName);
+      if (process.platform === "win32") {
+        fs.writeFileSync(cachedBinPath, `@echo 9.9.9\r\n`);
+      } else {
+        fs.writeFileSync(cachedBinPath, `#!/bin/sh\necho 9.9.9\n`, { mode: 0o755 });
+      }
+
+      const prevPath = process.env.PATH;
+      process.env.PATH = `${binDir}${path.delimiter}${prevPath}`;
+      try {
+        // No preferPath / offline → PATH must be ignored, cache must win.
+        const result = await resolveAgent("codex", { cacheRoot, offline: true });
+        expect(result.source).toBe("cache");
+        expect(result.binPath).toBe(cachedBinPath);
+        expect(result.displayLine).not.toContain("system PATH");
       } finally {
         process.env.PATH = prevPath;
       }
