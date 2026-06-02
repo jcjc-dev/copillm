@@ -96,7 +96,9 @@ describe("copillm copilot launcher", () => {
       ...process.env,
       PATH: childPath,
       COPILLM_HOME: tmpHome,
-      COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1"
+      COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1",
+      // Stubbed copilot binary lives on PATH for this test; opt in to the PATH lookup.
+      COPILLM_USE_SYSTEM_AGENT: "1"
     };
     // Ensure we never pre-set the token in the parent env — the launcher
     // must derive it from the stored credential.
@@ -134,7 +136,8 @@ describe("copillm copilot launcher", () => {
         PATH: `${shimDir}:${process.env.PATH ?? ""}`,
         COPILLM_HOME: emptyHome,
         COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1",
-        COPILLM_FORCE_SESSION_BACKEND: "1"
+        COPILLM_FORCE_SESSION_BACKEND: "1",
+        COPILLM_USE_SYSTEM_AGENT: "1"
       };
       delete env.COPILOT_GITHUB_TOKEN;
 

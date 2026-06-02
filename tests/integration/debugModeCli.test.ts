@@ -89,7 +89,9 @@ describe("global copillm --debug", () => {
       {
         env: {
           ...testEnv(seeded.copillmHome, mock),
-          PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`
+          PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
+          // Stubbed claude binary lives on PATH for this test; opt in to PATH lookup.
+          COPILLM_USE_SYSTEM_AGENT: "1"
         },
         encoding: "utf8",
         timeout: 30_000
