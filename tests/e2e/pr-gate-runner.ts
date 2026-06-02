@@ -11,7 +11,7 @@ import { startCopillmAgainstMock, type CopillmDaemon } from "./spawn-copillm.js"
 import { codexLikeChat, discoverCodexModels } from "./clients/codexLikeClient.js";
 import { claudeLikeChat, discoverClaudeModels } from "./clients/claudeLikeClient.js";
 import { piLikeChat, pickPiProvider, readPiModelsConfig } from "./clients/piLikeClient.js";
-import { buildAgentStubTarball, createAgentStub, createFakeNpm, type AgentName } from "./agent-stubs.js";
+import { buildAgentStubTarball, createAgentStub, createFakeNpm, writeNodeShim, type AgentName } from "./agent-stubs.js";
 
 interface AssertionFailure {
   scenario: string;
@@ -523,6 +523,7 @@ async function runLauncherScenarios(
         // View-only npm shim — install MUST NOT be called (cache should hit).
         const cacheReuseNpm = path.join(scenarioDir, "cache-reuse-bin");
         fs.mkdirSync(cacheReuseNpm, { recursive: true });
+        writeNodeShim(cacheReuseNpm);
         const viewOnlyShim =
           `#!/usr/bin/env node\n` +
           `if (process.argv[2] === "view") { process.stdout.write("9.9.9-test\\n"); process.exit(0); }\n` +

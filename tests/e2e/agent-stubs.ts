@@ -22,6 +22,7 @@ const STUB_VERSION = "0.0.1";
 export function createAgentStub(opts: { dir: string; agent: AgentName; capturePath: string }): AgentStubInfo {
   const binDir = path.join(opts.dir, "bin");
   fs.mkdirSync(binDir, { recursive: true });
+  writeNodeShim(binDir);
 
   const interestingEnvVars =
     opts.agent === "codex"
@@ -145,6 +146,7 @@ export function createFakeNpm(opts: {
 }): { binDir: string } {
   const binDir = path.join(opts.dir, "fake-npm-bin");
   fs.mkdirSync(binDir, { recursive: true });
+  writeNodeShim(binDir);
 
   // Resolve real npm so the shim can fall through for unsupported cases.
   const realNpm = locateRealNpm();
@@ -189,6 +191,14 @@ export function createFakeNpm(opts: {
   }
 
   return { binDir };
+}
+
+export function writeNodeShim(binDir: string): void {
+  if (process.platform === "win32") {
+    fs.writeFileSync(path.join(binDir, "node.cmd"), `@"${process.execPath}" %*\r\n`);
+    return;
+  }
+  fs.writeFileSync(path.join(binDir, "node"), `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} "$@"\n`, { mode: 0o755 });
 }
 
 function locateRealNpm(): null | string {

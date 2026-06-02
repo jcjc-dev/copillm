@@ -17,6 +17,7 @@ import { refreshPiHome } from "../integrations/refreshPi.js";
 import { writeAuthStatusLine } from "../shared/backends.js";
 import { currentDebugLogPath, enableRuntimeDebug, getRootLogger, resolveCopillmDebug } from "../shared/debug.js";
 import { writeCommandOutput, writeHealthOutput } from "../shared/output.js";
+import { buildSelfSpawnCommand } from "../daemon/selfSpawn.js";
 
 export function register(program: Command): void {
   program
@@ -77,11 +78,11 @@ export function register(program: Command): void {
           return;
         }
 
-        const daemonArgs = [process.argv[1], "daemon"];
+        const daemonCommand = buildSelfSpawnCommand("daemon");
         if (debug) {
-          daemonArgs.push("--debug");
+          daemonCommand.args.push("--debug");
         }
-        const child = spawn(process.execPath, daemonArgs, {
+        const child = spawn(daemonCommand.command, daemonCommand.args, {
           detached: true,
           stdio: "ignore",
           env: daemonSpawnEnv(debug)
