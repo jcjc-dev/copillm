@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getCopillmHome } from "../config/home.js";
 import { type AgentName, AGENT_REGISTRY } from "../integrations/registry.js";
+import { renameDirWithRetry } from "./renameDirWithRetry.js";
 
 export type { AgentName };
 export type ResolveSource = "path" | "cache" | "installed";
@@ -187,7 +188,18 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     if (fs.existsSync(finalDir)) {
       fs.rmSync(finalDir, { recursive: true, force: true });
     }
-    fs.renameSync(stagingDir, finalDir);
+    try {
+      await renameDirWithRetry(stagingDir, finalDir, { log });
+    } catch (renameError) {
+      // Leave nothing behind on disk for the next attempt to trip over. The
+      // staged tree is throwaway state once promotion fails.
+      try {
+        fs.rmSync(stagingDir, { recursive: true, force: true });
+      } catch {
+        // best effort
+      }
+      throw renameError;
+    }
     fs.writeFileSync(path.join(finalDir, "version.txt"), `${target}\n`);
 
     const pruned = pruneSiblings(agentRoot, target);
