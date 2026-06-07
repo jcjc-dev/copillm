@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import { resolveAgent } from "./resolveAgent.js";
+import { spawnAgent } from "./windowsSpawn.js";
 import { type AgentName } from "../integrations/registry.js";
 
 export interface LaunchOptions {
@@ -30,11 +30,9 @@ export async function launchAgent(opts: LaunchOptions): Promise<number> {
   log(resolved.displayLine);
 
   const childEnv: NodeJS.ProcessEnv = { ...process.env, ...opts.env };
-  const useShell = process.platform === "win32" && /\.(cmd|bat)$/i.test(resolved.binPath);
-  const child = spawn(resolved.binPath, opts.args, {
+  const child = spawnAgent(resolved.binPath, opts.args, {
     stdio: "inherit",
-    env: childEnv,
-    shell: useShell
+    env: childEnv
   });
 
   return new Promise<number>((resolve, reject) => {
