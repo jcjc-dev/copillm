@@ -93,17 +93,25 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     }
   }
 
-  // 2. Determine target version
+  // 2. Determine target version. If we can reach npm we ask for `latest`;
+  // otherwise we fall through to whatever's already cached so the user can
+  // keep working when the registry is unreachable (corp proxy, npm outage,
+  // airplane mode, etc.).
   let target = pin.version;
+  let viewError: null | Error = null;
   if (!target && !opts.offline) {
-    target = npmViewLatest(npmExe, pkg);
+    try {
+      target = npmViewLatest(npmExe, pkg);
+    } catch (err) {
+      viewError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
   // 3. Cache lookup
   if (target) {
     const cachedDir = path.join(agentRoot, target);
-    const cachedBin = binPathInPrefix(cachedDir, binName);
-    if (cachedBin && fs.existsSync(cachedBin)) {
+    const cachedBin = findReadyCachedBin(cachedDir, binName);
+    if (cachedBin) {
       return {
         source: "cache",
         binPath: cachedBin,
@@ -115,8 +123,13 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       };
     }
   } else {
+    // Either --offline or we couldn't reach npm to ask "what's latest?".
+    // Use the newest known-good install on disk.
     const last = pickLastCached(agentRoot, binName);
     if (last) {
+      if (viewError) {
+        log(`\u26a0 could not reach npm registry to check for updates (${viewError.message}); using cached ${binName} v${last.version}`);
+      }
       return {
         source: "cache",
         binPath: last.binPath,
@@ -127,6 +140,9 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
         displayLine: `\u2192 ${binName} (cached fallback, ${displayPath(last.dir)}, v${last.version})`
       };
     }
+    if (viewError) {
+      throw new Error(`${binName} not installed and could not reach npm registry to download it: ${viewError.message}`);
+    }
     throw new Error(`${binName} not installed and no cache available (offline).`);
   }
 
@@ -134,7 +150,14 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     throw new Error(`${binName}@${target} not in cache and --offline is set.`);
   }
 
-  // 4. Install
+  // 4. Install. We install *directly* into the canonical version directory
+  // and write `version.txt` LAST as the "install complete" marker.
+  // findReadyCachedBin requires both the bin and the marker, so any crash
+  // before the marker is written leaves the tree visible as incomplete and
+  // the next run cleans it up + re-installs. Avoids the older staging+rename
+  // pattern, which had to retry rename-of-directory on Windows when AV or
+  // npm post-install workers transiently held handles on freshly-written
+  // files.
   log(`\u2192 ${binName} (installing ${pkg}@${target} into ${displayPath(agentRoot)} \u2026)`);
   fs.mkdirSync(agentRoot, { recursive: true });
 
@@ -143,8 +166,8 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   try {
     // Re-check after acquiring lock — another invocation may have just installed it.
     const finalDir = path.join(agentRoot, target);
-    const recheckBin = binPathInPrefix(finalDir, binName);
-    if (recheckBin && fs.existsSync(recheckBin)) {
+    const recheckBin = findReadyCachedBin(finalDir, binName);
+    if (recheckBin) {
       return {
         source: "cache",
         binPath: recheckBin,
@@ -156,49 +179,46 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       };
     }
 
-    const stagingDir = path.join(agentRoot, `.staging-${sanitize(target)}-${process.pid}`);
-    if (fs.existsSync(stagingDir)) {
-      fs.rmSync(stagingDir, { recursive: true, force: true });
+    // Wipe any partial state (missing marker means a previous attempt was
+    // interrupted) before we re-run npm into the same prefix.
+    if (fs.existsSync(finalDir)) {
+      fs.rmSync(finalDir, { recursive: true, force: true });
     }
-    fs.mkdirSync(stagingDir, { recursive: true });
+    fs.mkdirSync(finalDir, { recursive: true });
 
     const spec = `${pkg}@${target}`;
     const installResult = spawnSync(
       npmExe,
-      ["install", "--prefix", stagingDir, "--no-audit", "--no-fund", "--omit=dev", spec],
+      ["install", "--prefix", finalDir, "--no-audit", "--no-fund", "--omit=dev", spec],
       {
         stdio: ["ignore", "inherit", "inherit"],
         shell: process.platform === "win32"
       }
     );
     if (installResult.status !== 0) {
+      cleanupFailedInstall(finalDir);
       const msg = installResult.error ? `: ${installResult.error.message}` : "";
       throw new Error(`npm install ${spec} failed (exit ${installResult.status})${msg}`);
     }
 
-    const stagedBin = binPathInPrefix(stagingDir, binName);
-    if (!stagedBin || !fs.existsSync(stagedBin)) {
-      throw new Error(`Installed package did not produce a ${binName} bin at ${stagingDir}`);
+    const installedBin = binPathInPrefix(finalDir, binName);
+    if (!installedBin || !fs.existsSync(installedBin)) {
+      cleanupFailedInstall(finalDir);
+      throw new Error(`Installed package did not produce a ${binName} bin at ${finalDir}`);
     }
-    if (probeVersion(stagedBin) === null) {
-      throw new Error(`Smoke test failed: ${stagedBin} --version did not exit 0`);
+    if (probeVersion(installedBin) === null) {
+      cleanupFailedInstall(finalDir);
+      throw new Error(`Smoke test failed: ${installedBin} --version did not exit 0`);
     }
 
-    if (fs.existsSync(finalDir)) {
-      fs.rmSync(finalDir, { recursive: true, force: true });
-    }
-    fs.renameSync(stagingDir, finalDir);
+    // Marker file: MUST be the last write. Cache-hit checks key off this.
     fs.writeFileSync(path.join(finalDir, "version.txt"), `${target}\n`);
 
     const pruned = pruneSiblings(agentRoot, target);
 
-    const finalBin = binPathInPrefix(finalDir, binName);
-    if (!finalBin) {
-      throw new Error(`Final install missing bin at ${finalDir}`);
-    }
     return {
       source: "installed",
-      binPath: finalBin,
+      binPath: installedBin,
       version: target,
       packageName: pkg,
       cacheDir: finalDir,
@@ -208,6 +228,25 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   } finally {
     releaseFileLock(lockFile);
   }
+}
+
+function cleanupFailedInstall(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Best-effort: a stuck handle here means the next run will retry the
+    // cleanup before reinstalling. Worst case the user gets a clearer
+    // "rmSync failed" error on the next attempt.
+  }
+}
+
+function findReadyCachedBin(dir: string, binName: string): null | string {
+  const bin = binPathInPrefix(dir, binName);
+  if (!bin || !fs.existsSync(bin)) return null;
+  // version.txt is written LAST, after the smoke test passes. Missing
+  // marker = partial/aborted install; do not treat as a cache hit.
+  if (!fs.existsSync(path.join(dir, "version.txt"))) return null;
+  return bin;
 }
 
 function defaultNpmExecutable(): string {
@@ -291,7 +330,7 @@ function pickLastCached(agentRoot: string, binName: string): null | { dir: strin
     .sort((a, b) => compareVersionsDescending(a, b));
   for (const v of versions) {
     const dir = path.join(agentRoot, v);
-    const bin = binPathInPrefix(dir, binName);
+    const bin = findReadyCachedBin(dir, binName);
     if (bin) return { dir, binPath: bin, version: v };
   }
   return null;
@@ -390,8 +429,4 @@ function displayPath(p: string): string {
     return p.replace(home, "~");
   }
   return p;
-}
-
-function sanitize(s: string): string {
-  return s.replace(/[^A-Za-z0-9._-]/g, "_");
 }
