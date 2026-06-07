@@ -135,6 +135,8 @@ describe("resolveAgent (path lookup)", async () => {
 
       // Pre-populate the cache with a fake installed codex so the resolver picks it
       // up via the "cached fallback" branch (no version pin, no network).
+      // The cache hit requires BOTH the bin and the version.txt marker —
+      // see findReadyCachedBin in src/cli/resolveAgent.ts.
       const cacheRoot = path.join(tmp, "cache");
       const cachedVersionDir = path.join(cacheRoot, "codex", "9.9.9");
       const cachedBinDir = path.join(cachedVersionDir, "node_modules", ".bin");
@@ -146,6 +148,7 @@ describe("resolveAgent (path lookup)", async () => {
       } else {
         fs.writeFileSync(cachedBinPath, `#!/bin/sh\necho 9.9.9\n`, { mode: 0o755 });
       }
+      fs.writeFileSync(path.join(cachedVersionDir, "version.txt"), "9.9.9\n");
 
       const prevPath = process.env.PATH;
       process.env.PATH = `${binDir}${path.delimiter}${prevPath}`;
@@ -158,6 +161,153 @@ describe("resolveAgent (path lookup)", async () => {
       } finally {
         process.env.PATH = prevPath;
       }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// Cache-readiness gate: version.txt is the install-complete marker. If it's
+// missing (= the previous install was interrupted before the smoke test wrote
+// it), the directory MUST NOT be treated as a cache hit even though the bin
+// exists.
+describe("resolveAgent (cache readiness)", async () => {
+  const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
+
+  function seedCachedBin(cacheRoot: string, agent: string, version: string, opts: { withMarker: boolean }): string {
+    const versionDir = path.join(cacheRoot, agent, version);
+    const binDir = path.join(versionDir, "node_modules", ".bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const binName = process.platform === "win32" ? `${agent}.cmd` : agent;
+    const binPath = path.join(binDir, binName);
+    if (process.platform === "win32") {
+      fs.writeFileSync(binPath, `@echo ${version}\r\n`);
+    } else {
+      fs.writeFileSync(binPath, `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+    }
+    if (opts.withMarker) {
+      fs.writeFileSync(path.join(versionDir, "version.txt"), `${version}\n`);
+    }
+    return binPath;
+  }
+
+  it("hits the cache when both bin and version.txt are present", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-ready-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const expectedBin = seedCachedBin(cacheRoot, "codex", "1.2.3", { withMarker: true });
+      const result = await resolveAgent("codex", { cacheRoot, offline: true });
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(expectedBin);
+      expect(result.version).toBe("1.2.3");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("misses the cache when version.txt is absent (partial install)", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-partial-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      seedCachedBin(cacheRoot, "codex", "1.2.3", { withMarker: false });
+      // Offline mode + no marker = no installable fallback = error.
+      // The bin existing alone must NOT be enough to consider the cache ready.
+      await expect(resolveAgent("codex", { cacheRoot, offline: true })).rejects.toThrow(
+        /not installed/
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("pickLastCached skips partial installs and picks the newest marker-complete one", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-skip-partial-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      // 2.0.0 is partial (no marker), 1.5.0 is complete. Even though 2.0.0
+      // sorts higher, fallback must pick 1.5.0.
+      seedCachedBin(cacheRoot, "codex", "2.0.0", { withMarker: false });
+      const expected = seedCachedBin(cacheRoot, "codex", "1.5.0", { withMarker: true });
+      const result = await resolveAgent("codex", { cacheRoot, offline: true });
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(expected);
+      expect(result.version).toBe("1.5.0");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+// Registry-unreachable fallback: if `npm view <pkg> version` fails (network
+// down, corp proxy, npm outage), copillm must transparently fall back to the
+// newest version it has on disk instead of erroring out — the user can keep
+// working with whatever they last successfully installed.
+describe("resolveAgent (npm view fallback)", async () => {
+  const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
+
+  function fakeNpmThatAlwaysFails(dir: string): string {
+    fs.mkdirSync(dir, { recursive: true });
+    if (process.platform === "win32") {
+      const cmdPath = path.join(dir, "fake-npm.cmd");
+      // @echo off + write to stderr + exit nonzero, to mimic `npm view` failing.
+      fs.writeFileSync(cmdPath, "@echo off\r\necho fake-npm: network unreachable 1>&2\r\nexit /b 1\r\n");
+      return cmdPath;
+    }
+    const shPath = path.join(dir, "fake-npm");
+    fs.writeFileSync(shPath, "#!/bin/sh\necho 'fake-npm: network unreachable' 1>&2\nexit 1\n", { mode: 0o755 });
+    return shPath;
+  }
+
+  function seedCachedBin(cacheRoot: string, agent: string, version: string): string {
+    const versionDir = path.join(cacheRoot, agent, version);
+    const binDir = path.join(versionDir, "node_modules", ".bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const binName = process.platform === "win32" ? `${agent}.cmd` : agent;
+    const binPath = path.join(binDir, binName);
+    if (process.platform === "win32") {
+      fs.writeFileSync(binPath, `@echo ${version}\r\n`);
+    } else {
+      fs.writeFileSync(binPath, `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+    }
+    fs.writeFileSync(path.join(versionDir, "version.txt"), `${version}\n`);
+    return binPath;
+  }
+
+  it("falls back to the latest cached version when npm view fails", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-npm-fail-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const expectedBin = seedCachedBin(cacheRoot, "codex", "1.2.3");
+      const npmExecutable = fakeNpmThatAlwaysFails(path.join(tmp, "fakenpm"));
+
+      const logs: string[] = [];
+      const result = await resolveAgent("codex", {
+        cacheRoot,
+        npmExecutable,
+        log: (line) => logs.push(line)
+      });
+
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(expectedBin);
+      expect(result.version).toBe("1.2.3");
+      // The fallback should warn the user that the registry was unreachable so
+      // they know they're not necessarily running the latest version.
+      const warned = logs.some((l) => /npm registry/i.test(l) && /codex/.test(l) && /1\.2\.3/.test(l));
+      expect(warned, `expected a registry-unreachable warning in logs: ${JSON.stringify(logs)}`).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("errors with a clear message when npm view fails AND the cache is empty", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-no-cache-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const npmExecutable = fakeNpmThatAlwaysFails(path.join(tmp, "fakenpm"));
+
+      await expect(
+        resolveAgent("codex", { cacheRoot, npmExecutable })
+      ).rejects.toThrow(/could not reach npm registry/i);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
