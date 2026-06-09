@@ -178,6 +178,64 @@ args = ["hi"]
   });
 });
 
+describe("applyAgentConfig — copilot", () => {
+  it("writes Copilot MCP config and emits --additional-mcp-config CLI args", () => {
+    writeGlobal(`
+[defaults.mcp.servers.always_on]
+transport = "stdio"
+command = "echo"
+args = ["default"]
+env = { DEFAULT_ENV = "1" }
+cwd = "/tmp"
+
+[profiles.work.mcp.servers.remote]
+transport = "http"
+url = "https://example.com/mcp"
+headers = { Authorization = "Bearer abc", X_Trace = "1" }
+`);
+
+    const result = applyAgentConfig({ agent: "copilot", cwd: tmpCwd, profileOverride: "work" });
+    const managedPath = path.join(tmpHome, "copilot", "mcp-config.json");
+
+    expect(result.cliArgs).toEqual(["--additional-mcp-config", `@${managedPath}`]);
+    expect(result.notes).toEqual([]);
+    expect(fs.existsSync(managedPath)).toBe(true);
+
+    const written = JSON.parse(fs.readFileSync(managedPath, "utf8"));
+    expect(written.mcpServers.always_on).toEqual({
+      type: "local",
+      command: "echo",
+      tools: ["*"],
+      args: ["default"],
+      env: { DEFAULT_ENV: "1" },
+      cwd: "/tmp"
+    });
+    expect(written.mcpServers.remote).toEqual({
+      type: "http",
+      url: "https://example.com/mcp",
+      tools: ["*"],
+      headers: { Authorization: "Bearer abc", X_Trace: "1" }
+    });
+  });
+
+  it("removes stale managed config when profile no longer declares any servers", () => {
+    writeGlobal(`
+[defaults.mcp.servers.first]
+transport = "http"
+url = "https://example.com/a"
+[profiles.default]
+`);
+    applyAgentConfig({ agent: "copilot", cwd: tmpCwd });
+    const managedPath = path.join(tmpHome, "copilot", "mcp-config.json");
+    expect(fs.existsSync(managedPath)).toBe(true);
+
+    writeGlobal(`[profiles.default]\n`);
+    const result = applyAgentConfig({ agent: "copilot", cwd: tmpCwd });
+    expect(fs.existsSync(managedPath)).toBe(false);
+    expect(result.cliArgs).toEqual([]);
+  });
+});
+
 describe("applyAgentConfig — skip + no-config", () => {
   it("returns no-op when no agent.toml exists", () => {
     const result = applyAgentConfig({ agent: "claude", cwd: tmpCwd });
