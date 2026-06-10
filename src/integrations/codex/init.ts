@@ -1,12 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { CopilotTokenManager } from "../../auth/copilotToken.js";
-import { loadStoredCredential } from "../../auth/credentials.js";
+import { loadStoredCredential, type StoredCredential } from "../../auth/credentials.js";
 import { loadConfig } from "../../config/config.js";
-import { listModelsUnion } from "../../models/discovery.js";
+import { listModelsUnion, type ModelDiscoveryResult } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
 import { buildCodexCatalog } from "../../server/codexSchema.js";
 import { inspectLock } from "../../server/lock.js";
+import type { AppConfig } from "../../types/index.js";
 
 export interface CodexInitOptions {
   outDir: string;
@@ -14,6 +14,33 @@ export interface CodexInitOptions {
   port: number;
   providerId: string;
   reasoningEffort: string | null;
+  /**
+   * Optional pre-loaded context. When provided, `generateCodexHome` skips
+   * its own `loadConfig` / `loadStoredCredential` / `listModelsUnion` calls
+   * and uses the supplied values. The CLI `start` command uses this to
+   * collapse 3 redundant token exchanges + 3 model-discovery calls into 1
+   * across the daemon + codex + pi init steps.
+   *
+   * When omitted, behaviour is unchanged — `copillm codex`, `copillm env
+   * codex`, and any other standalone caller continues to work as before.
+   */
+  precomputed?: PrecomputedStartContext;
+}
+
+/**
+ * Context shared across the daemon + codex + pi steps of `copillm start`.
+ *
+ * Without sharing, each step independently re-runs `loadStoredCredential`
+ * (a keychain read), `loadConfig` (a YAML parse), and `listModelsUnion`
+ * (multiple Copilot `/models` fetches). The token exchange itself is now
+ * gone from these sites (see PR 2 commit), but the remaining work is still
+ * worth deduping — it cuts keychain audit-log entries and removes more
+ * flake surface on the catalog fetch.
+ */
+export interface PrecomputedStartContext {
+  creds: StoredCredential;
+  config: AppConfig;
+  discovery: ModelDiscoveryResult;
 }
 
 export interface CodexInitResult {
@@ -26,15 +53,7 @@ export interface CodexInitResult {
 }
 
 export async function generateCodexHome(options: CodexInitOptions): Promise<CodexInitResult> {
-  const config = loadConfig();
-  const creds = await loadStoredCredential();
-  if (!creds) {
-    throw new Error("Not authenticated. Run `copillm login` first.");
-  }
-
-  const tokenManager = new CopilotTokenManager(creds.token);
-  await tokenManager.ensureToken(false);
-  const discovery = await listModelsUnion(config.accountType, creds.token, 3);
+  const { discovery } = await resolveStartContext(options.precomputed);
   const catalog = buildCodexCatalog(discovery.models);
   if (catalog.models.length === 0) {
     throw new Error("No Codex-eligible models found in the live catalog.");
@@ -71,6 +90,27 @@ export async function generateCodexHome(options: CodexInitOptions): Promise<Code
     proxyUrl,
     exportCommand: `CODEX_HOME=${absOutDir} codex`
   };
+}
+
+/**
+ * Load credentials / config / model discovery once. When the caller has
+ * already done this work (e.g. `copillm start` orchestrating multiple init
+ * steps), it can pass them in via `precomputed` to skip the work.
+ *
+ * Exported so `generatePiHome` (and any future agent init) can use the
+ * same loader and the same "if precomputed, reuse it" contract.
+ */
+export async function resolveStartContext(precomputed?: PrecomputedStartContext): Promise<PrecomputedStartContext> {
+  if (precomputed) {
+    return precomputed;
+  }
+  const config = loadConfig();
+  const creds = await loadStoredCredential();
+  if (!creds) {
+    throw new Error("Not authenticated. Run `copillm login` first.");
+  }
+  const discovery = await listModelsUnion(config.accountType, creds.token, 3);
+  return { config, creds, discovery };
 }
 
 function pickDefaultModel(slugs: readonly string[]): string {
