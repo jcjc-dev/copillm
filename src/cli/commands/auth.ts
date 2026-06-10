@@ -1,5 +1,5 @@
 import type { Command } from "commander";
-import { inspectStoredCredential } from "../../auth/credentials.js";
+import { inspectStoredCredential, loadStoredCredentialForStatus } from "../../auth/credentials.js";
 import { inspectGithubIdentity, type GithubIdentitySummary } from "../../auth/githubIdentity.js";
 import { ensureAuthenticatedInteractive } from "../auth/ensure.js";
 import { runAuthLogin, runAuthLogout } from "../auth/runAuth.js";
@@ -56,9 +56,36 @@ export function register(program: Command): void {
     .option("--json", "JSON output")
     .option("--no-user", "Skip the GitHub /user lookup that fetches the login name")
     .action(async (opts: { json?: boolean; user?: boolean }) => {
-      let info: Awaited<ReturnType<typeof inspectStoredCredential>>;
+      // commander's --no-user toggles opts.user to false; when the flag is
+      // omitted opts.user is undefined and we treat that as "fetch by default".
+      const wantUserLookup = opts.user !== false;
+
+      // Two paths to minimize keychain probes:
+      //   - With user lookup (default): `loadStoredCredentialForStatus()`
+      //     does ONE keychain read that yields backend + token. Pass the
+      //     token into `inspectGithubIdentity({ token })` so it doesn't
+      //     re-read the keychain.
+      //   - Without user lookup (--no-user): `inspectStoredCredential()`
+      //     does ONE keychain probe and never sees the token. Preserves
+      //     the no-token invariant for the surface where it matters most.
+      //
+      // Previously, the user-lookup path made TWO keychain reads — one in
+      // `inspectStoredCredential` then another in `inspectGithubIdentity` →
+      // `loadStoredCredential`. That doubled macOS keychain audit-log
+      // entries and doubled permission-prompt exposure on misconfigured
+      // systems.
+      let info: { stored: boolean; backend: null | import("../../auth/credentials.js").CredentialBackend };
+      let token: undefined | string;
       try {
-        info = await inspectStoredCredential();
+        if (wantUserLookup) {
+          const loaded = await loadStoredCredentialForStatus();
+          info = { stored: loaded.stored, backend: loaded.backend };
+          if (loaded.stored) {
+            token = loaded.token;
+          }
+        } else {
+          info = await inspectStoredCredential();
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "unknown_error";
         if (opts.json) {
@@ -69,9 +96,7 @@ export function register(program: Command): void {
         process.exit(1);
       }
 
-      // commander's --no-user toggles opts.user to false; when the flag is
-      // omitted opts.user is undefined and we treat that as "fetch by default".
-      const userLookupEnabled = info.stored && opts.user !== false;
+      const userLookupEnabled = info.stored && wantUserLookup;
       let identity: null | GithubIdentitySummary = null;
       if (userLookupEnabled) {
         // inspectGithubIdentity is designed to return null on any failure, but
@@ -81,7 +106,7 @@ export function register(program: Command): void {
         // must never break the auth-status command. Status output should always
         // succeed even when the network is broken.
         try {
-          identity = await inspectGithubIdentity();
+          identity = await inspectGithubIdentity({ token });
         } catch {
           identity = null;
         }

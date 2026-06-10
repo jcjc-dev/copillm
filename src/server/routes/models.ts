@@ -7,6 +7,7 @@ import {
 import { listModels, listModelsUnion } from "../../models/discovery.js";
 import { buildCodexCatalog } from "../codexSchema.js";
 import { buildAnthropicModelsResponse } from "../anthropicModelsResponse.js";
+import { tokenErrorToHttpResponse } from "../errors.js";
 import { safeSendJson } from "../requestLifecycle.js";
 import type { RequestRoute } from "./shared.js";
 
@@ -46,7 +47,12 @@ export async function handleModels(
     });
   } catch (error) {
     if (error instanceof CopilotTokenManagerError) {
-      safeSendJson(res, 503, { error: "token_refresh_failed" });
+      // Discriminate credential failure (401/403 from upstream — terminal)
+      // from transient blip (5xx/429 from upstream — retryable by caller).
+      // Was: flat `503 token_refresh_failed` for both, which made codex/pi/
+      // claude blindly retry on the permanent case.
+      const mapped = tokenErrorToHttpResponse(error);
+      safeSendJson(res, mapped.httpStatus, mapped.payload);
       return;
     }
     throw error;

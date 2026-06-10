@@ -12,6 +12,20 @@ export interface GithubIdentitySummary {
   name: null | string;
 }
 
+export interface InspectGithubIdentityOptions {
+  timeoutMs?: number;
+  /**
+   * Pre-loaded OAuth token. When supplied, skips the internal
+   * `loadStoredCredential` call — used by `auth status` to coalesce the
+   * keychain read so the OS keychain is only probed once per command, not
+   * twice. When omitted, behaves exactly as before.
+   *
+   * The token never escapes this function — only the resulting
+   * `GithubIdentitySummary` (which contains no secret) is returned.
+   */
+  token?: string;
+}
+
 /**
  * Inspection-style wrapper around loadStoredCredential + getGithubUserSummary
  * that resolves the GitHub identity without ever exposing the token to the
@@ -26,20 +40,24 @@ export interface GithubIdentitySummary {
  * null so callers can gracefully fall back to existing offline output.
  */
 export async function inspectGithubIdentity(
-  options: { timeoutMs?: number } = {}
+  options: InspectGithubIdentityOptions = {}
 ): Promise<null | GithubIdentitySummary> {
-  let credential: Awaited<ReturnType<typeof loadStoredCredential>>;
-  try {
-    credential = await loadStoredCredential();
-  } catch {
-    return null;
-  }
-  if (!credential) {
-    return null;
+  let token: undefined | string = options.token;
+  if (typeof token !== "string") {
+    let credential: Awaited<ReturnType<typeof loadStoredCredential>>;
+    try {
+      credential = await loadStoredCredential();
+    } catch {
+      return null;
+    }
+    if (!credential) {
+      return null;
+    }
+    token = credential.token;
   }
 
   try {
-    const summary = await getGithubUserSummary(credential.token, {
+    const summary = await getGithubUserSummary(token, {
       timeoutMs: options.timeoutMs ?? 4_000
     });
     if (!summary.login) {

@@ -24,7 +24,10 @@ export async function handleDebug(
 
   if (input.githubToken) {
     try {
-      const summary = await getGithubUserSummary(input.githubToken);
+      // Bound the GitHub user lookup so a slow `api.github.com` cannot hang
+      // the `/_debug` handler indefinitely. Matches the bound used by the
+      // CLI's `auth status` path (`githubIdentity.ts:42-44`).
+      const summary = await getGithubUserSummary(input.githubToken, { timeoutMs: 4_000 });
       user = {
         login: summary.login,
         id: summary.id,
