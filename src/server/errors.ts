@@ -179,6 +179,25 @@ export function upstreamStatusCategory(status: number): string {
 }
 
 export function healthFailure(error: unknown): { httpStatus: number; payload: Record<string, unknown> } {
+  return tokenErrorToHttpResponse(error);
+}
+
+/**
+ * Map a `CopilotTokenManagerError` (or any unknown error from the token
+ * exchange / refresh path) to an HTTP response. Single source of truth for
+ * the `/healthz`, `/models`, `/codex/v1/models`, and `/anthropic/v1/models`
+ * routes — previously `routes/models.ts` collapsed every token failure to a
+ * flat 503 `token_refresh_failed`, hiding the credential-vs-blip
+ * distinction that callers (codex, pi, claude) need to decide whether to
+ * retry. The discrimination logic now lives here.
+ *
+ * Maps:
+ *   - 401/403 from the upstream token endpoint   → HTTP 401 `github_auth_invalid`
+ *   - 5xx/429/other transient from upstream      → HTTP 503 `token_exchange_failed`
+ *   - other `CopilotTokenManagerError`           → HTTP 401 `token_refresh_failed`
+ *   - anything else                              → HTTP 503 `token_refresh_unavailable`
+ */
+export function tokenErrorToHttpResponse(error: unknown): { httpStatus: number; payload: Record<string, unknown> } {
   if (error instanceof CopilotTokenExchangeError) {
     if (error.statusCode === 401 || error.statusCode === 403) {
       return {

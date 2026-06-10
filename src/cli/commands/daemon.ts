@@ -374,11 +374,22 @@ export function register(program: Command): void {
         return;
       }
 
-      const response = await fetch(`http://127.0.0.1:${lockState.lock.port}/healthz`, { signal: AbortSignal.timeout(2_000) });
-      const payload = (await response.json()) as Record<string, unknown>;
-      const output = { ok: response.ok, status_code: response.status, ...payload };
-      writeHealthOutput(opts, output);
-      if (!response.ok) {
+      // Route the /healthz check through `probeHealth` so we inherit retry
+      // on transient transport errors AND a try/catch that turns a transient
+      // ECONNRESET into a structured `health_probe_failed` result instead of
+      // a raw stack trace. The previous bare `fetch` had no try/catch and
+      // would crash `copillm health` if the daemon had just been killed
+      // between `inspectLock` and the request.
+      const health = await probeHealth(lockState.lock.port);
+      const payload: Record<string, unknown> = {
+        ok: health.ok,
+        status_code: health.statusCode
+      };
+      if (health.status !== null) payload.status = health.status;
+      if (health.error !== null) payload.error = health.error;
+      if (health.bearerTtlSeconds !== null) payload.bearer_ttl_seconds = health.bearerTtlSeconds;
+      writeHealthOutput(opts, payload);
+      if (!health.ok) {
         process.exitCode = 1;
       }
     });

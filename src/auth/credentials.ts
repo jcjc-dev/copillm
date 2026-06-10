@@ -246,6 +246,56 @@ export async function loadStoredCredential(): Promise<null | StoredCredential> {
   return { token, accountType: "individual", source: "keyring" };
 }
 
+/**
+ * Coalesced inspect + load for status surfaces. Returns the same fields
+ * `inspectStoredCredential` exposes (`stored` + `backend`) AND the
+ * `token` — but performs only ONE backend probe.
+ *
+ * Previously, `auth status` with user-lookup enabled did:
+ *   1. `inspectStoredCredential` → one `keyring.getPassword` (backend probe)
+ *   2. `loadStoredCredential` (inside `inspectGithubIdentity`) → another
+ *      `keyring.getPassword` (full token read)
+ *
+ * On macOS, each call is its own keychain audit-log entry and (on a
+ * misconfigured system) its own permission prompt. This helper folds both
+ * into a single backend probe + single read.
+ *
+ * SECURITY: callers MUST treat the `token` field as sensitive — do not log,
+ * print, or persist it. The status JSON output and `formatHumanAuthStatusLine`
+ * only consume `backend` (and the upstream identity summary returned by
+ * `inspectGithubIdentity`), never `token` directly. Enforced at the call
+ * site (`tests/integration/authStatusCli.test.ts` runs a substring-leak
+ * guard on the printed output).
+ */
+export async function loadStoredCredentialForStatus(): Promise<
+  | { stored: false; backend: null; token: null }
+  | { stored: true; backend: CredentialBackend; token: string }
+> {
+  if (sessionCredential) {
+    return { stored: true, backend: "session", token: sessionCredential.token };
+  }
+  if (fs.existsSync(credentialsReadPath())) {
+    const parsed = parseCredentialFile();
+    return { stored: true, backend: "file", token: parsed.token };
+  }
+  const { keyring } = await resolveKeyring();
+  if (!keyring) {
+    return { stored: false, backend: null, token: null };
+  }
+  try {
+    const token = await keyring.getPassword(SERVICE, ACCOUNT);
+    if (token) {
+      return { stored: true, backend: "keyring", token };
+    }
+    return { stored: false, backend: null, token: null };
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(`Failed to read token from OS keychain: ${error.message}`);
+    }
+    throw new Error("Failed to read token from OS keychain.");
+  }
+}
+
 export async function saveStoredCredential(
   token: string,
   accountType: AccountType,
