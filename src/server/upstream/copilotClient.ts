@@ -4,6 +4,7 @@ import type { AppConfig } from "../../types/index.js";
 import { accountBaseUrl } from "../../models/discovery.js";
 import { CopilotTokenManager } from "../../auth/copilotToken.js";
 import { isBenignSocketError } from "../requestLifecycle.js";
+import { isRetryableStatus, isRetryableTransportError, retryDelayMs } from "./retryPolicy.js";
 
 const COPILOT_HEADERS = {
   "Content-Type": "application/json",
@@ -22,9 +23,7 @@ const COPILOT_HEADERS = {
   "Accept-Encoding": "identity"
 };
 
-const RETRYABLE_UPSTREAM_STATUSES = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
 const MAX_UPSTREAM_ATTEMPTS = 3;
-const BASE_BACKOFF_MS = 200;
 
 export async function postToCopilot(input: {
   tokenManager: CopilotTokenManager;
@@ -147,37 +146,6 @@ function abortErrorFromSignal(signal: AbortSignal): Error {
   const err = new Error("Request aborted by client");
   (err as { name: string }).name = "AbortError";
   return err;
-}
-
-function isRetryableStatus(status: number): boolean {
-  return RETRYABLE_UPSTREAM_STATUSES.has(status);
-}
-
-function retryDelayMs(attempt: number): number {
-  return BASE_BACKOFF_MS * Math.pow(2, Math.max(0, attempt - 1));
-}
-
-function isRetryableTransportError(error: unknown): boolean {
-  if (!error || typeof error !== "object") {
-    return false;
-  }
-  const typedError = error as Error & { code?: string; cause?: { code?: string } };
-  const directCode = typedError.code?.toUpperCase();
-  const causeCode = typedError.cause?.code?.toUpperCase();
-  if (directCode === "ECONNRESET" || directCode === "ECONNREFUSED" || directCode === "ETIMEDOUT") {
-    return true;
-  }
-  if (causeCode === "ECONNRESET" || causeCode === "ECONNREFUSED" || causeCode === "ETIMEDOUT") {
-    return true;
-  }
-  if (!(typedError instanceof Error)) {
-    return false;
-  }
-  const message = typedError.message.toLowerCase();
-  if (message.includes("timed out") || message.includes("timeout")) {
-    return true;
-  }
-  return message.includes("econnreset") || message.includes("econnrefused") || message.includes("enotfound");
 }
 
 async function discardUpstreamBody(response: Response): Promise<void> {
