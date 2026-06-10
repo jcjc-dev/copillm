@@ -1,11 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { CopilotTokenManager } from "../../auth/copilotToken.js";
-import { loadStoredCredential } from "../../auth/credentials.js";
-import { loadConfig } from "../../config/config.js";
-import { listModelsUnion, type CopilotModel } from "../../models/discovery.js";
+import { type CopilotModel } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
+import { resolveStartContext, type PrecomputedStartContext } from "../codex/init.js";
 
 /**
  * pi (`@earendil-works/pi-coding-agent`) reads its config from a hardcoded
@@ -27,6 +25,13 @@ export interface PiInitOptions {
   /** Provider key prefix in pi's models.json. The Anthropic-surface provider
    *  uses this id verbatim; the OpenAI-responses provider appends `-responses`. */
   providerId: string;
+  /**
+   * Optional pre-loaded context shared with the daemon + codex steps of
+   * `copillm start`. When omitted, `generatePiHome` loads its own creds /
+   * config / discovery — preserving today's standalone behaviour for
+   * `copillm pi`, `copillm env pi`, and any other one-shot invocation.
+   */
+  precomputed?: PrecomputedStartContext;
 }
 
 export interface PiInitResult {
@@ -76,16 +81,7 @@ interface PiModelsConfig {
 }
 
 export async function generatePiHome(options: PiInitOptions): Promise<PiInitResult> {
-  const config = loadConfig();
-  const creds = await loadStoredCredential();
-  if (!creds) {
-    throw new Error("Not authenticated. Run `copillm login` first.");
-  }
-
-  const tokenManager = new CopilotTokenManager(creds.token);
-  await tokenManager.ensureToken(false);
-
-  const discovery = await listModelsUnion(config.accountType, creds.token, 3);
+  const { discovery } = await resolveStartContext(options.precomputed);
   const eligible = discovery.models.filter(isPickerEligible);
 
   // Split the catalog by which upstream endpoint each model supports. Models

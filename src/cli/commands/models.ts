@@ -1,6 +1,5 @@
 import type { Command } from "commander";
 import { loadStoredCredential } from "../../auth/credentials.js";
-import { CopilotTokenManager } from "../../auth/copilotToken.js";
 import { loadConfig, saveConfig } from "../../config/config.js";
 import { listModels, resolveModelSelections } from "../../models/discovery.js";
 import { writeCommandOutput } from "../shared/output.js";
@@ -18,8 +17,6 @@ export function register(program: Command): void {
       if (!creds) {
         throw new Error("Not authenticated. Run `copillm login`.");
       }
-      const tokenManager = new CopilotTokenManager(creds.token);
-      await tokenManager.ensureToken(false);
       const result = await listModels(config.accountType, creds.token);
       if (opts.json) {
         process.stdout.write(
@@ -67,8 +64,6 @@ export function register(program: Command): void {
       if (!creds) {
         throw new Error("Not authenticated. Run `copillm login`.");
       }
-      const tokenManager = new CopilotTokenManager(creds.token);
-      await tokenManager.ensureToken(false);
       const discovery = await listModels(config.accountType, creds.token);
       const resolution = resolveModelSelections(requested, discovery.models);
       if (resolution.unresolved.length > 0) {

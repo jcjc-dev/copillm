@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import { inspectStoredCredential, type CredentialBackend } from "../../auth/credentials.js";
 import { loadConfig } from "../../config/config.js";
 import { clearClaudeGatewayCache } from "../../integrations/claude/cache.js";
+import { resolveStartContext, type PrecomputedStartContext } from "../../integrations/codex/init.js";
 import { inspectLock, releaseLock } from "../../server/lock.js";
 import { buildCodexEnvBundle } from "../agentEnv.js";
 import { ensureAuthenticatedInteractive } from "../auth/ensure.js";
@@ -45,8 +46,9 @@ export function register(program: Command): void {
         const existingLock = await readLiveLock();
         if (existingLock) {
           const activeDebug = await warnIfDebugRequestedButInactive(debug, existingLock.port);
-          const codex = opts.codex === false ? null : await refreshCodexHome(existingLock.port, opts.codexModel ?? null);
-          const pi = opts.pi === false ? null : await refreshPiHome(existingLock.port);
+          const shared = await loadSharedStartContextIfNeeded(opts);
+          const codex = opts.codex === false ? null : await refreshCodexHome(existingLock.port, opts.codexModel ?? null, shared);
+          const pi = opts.pi === false ? null : await refreshPiHome(existingLock.port, shared);
           const claude = buildClaudeExportCommand(existingLock.port, null);
           const banner = formatStartBanner({
             port: existingLock.port,
@@ -94,8 +96,9 @@ export function register(program: Command): void {
           throw new Error("Detached daemon start timed out.");
         }
 
-        const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null);
-        const pi = opts.pi === false ? null : await refreshPiHome(started.port);
+        const sharedDetached = await loadSharedStartContextIfNeeded(opts);
+        const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, sharedDetached);
+        const pi = opts.pi === false ? null : await refreshPiHome(started.port, sharedDetached);
         const claude = buildClaudeExportCommand(started.port, null);
         const banner = formatStartBanner({
           port: started.port,
@@ -138,8 +141,9 @@ export function register(program: Command): void {
       const started = await runDaemon({ debug });
       if (started.kind === "already_running") {
         const activeDebug = await warnIfDebugRequestedButInactive(debug, started.lock.port);
-        const codex = opts.codex === false ? null : await refreshCodexHome(started.lock.port, opts.codexModel ?? null);
-        const pi = opts.pi === false ? null : await refreshPiHome(started.lock.port);
+        const sharedAlready = await loadSharedStartContextIfNeeded(opts);
+        const codex = opts.codex === false ? null : await refreshCodexHome(started.lock.port, opts.codexModel ?? null, sharedAlready);
+        const pi = opts.pi === false ? null : await refreshPiHome(started.lock.port, sharedAlready);
         const claude = buildClaudeExportCommand(started.lock.port, null);
         const banner = formatStartBanner({
           port: started.lock.port,
@@ -171,8 +175,9 @@ export function register(program: Command): void {
         return;
       }
 
-      const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null);
-      const pi = opts.pi === false ? null : await refreshPiHome(started.port);
+      const sharedForeground = await loadSharedStartContextIfNeeded(opts);
+      const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, sharedForeground);
+      const pi = opts.pi === false ? null : await refreshPiHome(started.port, sharedForeground);
       const claude = buildClaudeExportCommand(started.port, started.callerSecret);
       const banner = formatStartBanner({
         port: started.port,
@@ -377,4 +382,41 @@ export function register(program: Command): void {
         process.exitCode = 1;
       }
     });
+}
+
+/**
+ * Load the shared credential/config/discovery context for `copillm start`'s
+ * codex + pi init steps, ONLY when at least one of them is going to run.
+ *
+ * Without sharing, each step independently re-reads the OS keychain, re-parses
+ * the YAML config, and re-fetches the upstream `/models` catalog. With this
+ * helper, the work happens once and both steps see the same snapshot.
+ *
+ * When both `--no-codex` and `--no-pi` are passed (or both wrappers will skip
+ * for some other reason), there's no consumer for the context, so we skip
+ * the loads entirely — important for `copillm start --no-codex --no-pi` to
+ * stay fast and not surface a credential error if the user genuinely just
+ * wants the proxy daemon up.
+ *
+ * Returning `undefined` (not `null`) so it composes naturally with the
+ * `precomputed?: PrecomputedStartContext` optional parameter on both
+ * `refreshCodexHome` and `refreshPiHome`.
+ */
+async function loadSharedStartContextIfNeeded(opts: {
+  codex?: boolean;
+  pi?: boolean;
+}): Promise<PrecomputedStartContext | undefined> {
+  if (opts.codex === false && opts.pi === false) {
+    return undefined;
+  }
+  try {
+    return await resolveStartContext();
+  } catch {
+    // If the load fails (e.g. no credentials, model discovery down), fall
+    // back to per-wrapper loads so each one can fail loudly with its own
+    // wrapper-specific warning. The wrappers already have try/catch that
+    // emit `warning: failed to generate ...` lines — preserving that
+    // surface keeps the user-visible behaviour unchanged from before.
+    return undefined;
+  }
 }

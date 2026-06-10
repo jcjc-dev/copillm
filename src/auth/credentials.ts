@@ -211,7 +211,13 @@ export async function inspectStoredCredential(): Promise<{ stored: boolean; back
   }
 }
 
-export async function loadStoredCredential(): Promise<null | { token: string; accountType: AccountType; source: CredentialBackend }> {
+export interface StoredCredential {
+  token: string;
+  accountType: AccountType;
+  source: CredentialBackend;
+}
+
+export async function loadStoredCredential(): Promise<null | StoredCredential> {
   if (sessionCredential) {
     return { token: sessionCredential.token, accountType: sessionCredential.accountType, source: "session" };
   }
