@@ -37,13 +37,17 @@ function writeShim(dir: string, dumpPath: string): string {
   const shPath = path.join(dir, "copilot");
   fs.writeFileSync(
     shPath,
-    `#!/usr/bin/env bash\n` +
-      `if [ "$1" = "--version" ]; then\n` +
-      `  echo "shim 0.0.0"\n` +
-      `  exit 0\n` +
-      `fi\n` +
-      `printf '{"COPILOT_GITHUB_TOKEN":"%s"}\\n' "$COPILOT_GITHUB_TOKEN" > "${dumpPath}"\n` +
-      `exit 0\n`,
+    `#!/usr/bin/env node\n` +
+      `const fs = require("node:fs");\n` +
+      `if (process.argv[2] === "--version") {\n` +
+      `  console.log("shim 0.0.0");\n` +
+      `  process.exit(0);\n` +
+      `}\n` +
+      `fs.writeFileSync(${JSON.stringify(dumpPath)}, JSON.stringify({\n` +
+      `  COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN ?? "",\n` +
+      `  args: process.argv.slice(2)\n` +
+      `}) + "\\n");\n` +
+      `process.exit(0);\n`,
     { mode: 0o755 }
   );
   return shPath;
@@ -115,6 +119,7 @@ describe("copillm copilot launcher", () => {
 
     const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as {
       COPILOT_GITHUB_TOKEN: string;
+      args: string[];
     };
     expect(dump.COPILOT_GITHUB_TOKEN).toBe(SECRET_TOKEN);
 
@@ -123,6 +128,76 @@ describe("copillm copilot launcher", () => {
     // the substring guard in tests/authStatusCli.test.ts.
     expect(result.stdout).not.toContain(SECRET_TOKEN);
     expect(result.stderr).not.toContain(SECRET_TOKEN);
+  });
+
+  it("applies --profile MCP config through Copilot CLI additional config", () => {
+    if (process.platform === "win32") return;
+    if (!tmpHome || !shimDir || !envDumpPath) {
+      throw new Error("test setup did not complete");
+    }
+
+    fs.writeFileSync(
+      path.join(tmpHome, "agent.toml"),
+      `
+active_profile = "default"
+
+[defaults.mcp.servers.default_server]
+transport = "stdio"
+command = "echo"
+args = ["default"]
+
+[profiles.work.mcp.servers.work_server]
+transport = "http"
+url = "https://example.com/mcp"
+headers = { Authorization = "Bearer abc" }
+`
+    );
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+      COPILLM_HOME: tmpHome,
+      COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1",
+      COPILLM_USE_SYSTEM_AGENT: "1"
+    };
+    delete env.COPILOT_GITHUB_TOKEN;
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "copilot", "--profile", "work", "-p", "hello"],
+      { env, encoding: "utf8", timeout: 30_000 }
+    );
+
+    expect(result.error, result.error?.message).toBeUndefined();
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("native MCP config format is not yet documented");
+
+    const managedPath = path.join(tmpHome, "copilot", "mcp-config.json");
+    const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as {
+      COPILOT_GITHUB_TOKEN: string;
+      args: string[];
+    };
+    expect(dump.args).toEqual([
+      "-p",
+      "hello",
+      "--additional-mcp-config",
+      `@${managedPath}`
+    ]);
+    expect(dump.args).not.toContain("--profile");
+
+    const config = JSON.parse(fs.readFileSync(managedPath, "utf8"));
+    expect(config.mcpServers.default_server).toEqual({
+      type: "local",
+      command: "echo",
+      tools: ["*"],
+      args: ["default"]
+    });
+    expect(config.mcpServers.work_server).toEqual({
+      type: "http",
+      url: "https://example.com/mcp",
+      tools: ["*"],
+      headers: { Authorization: "Bearer abc" }
+    });
   });
 
   it("fails with a clear message when no credential is stored", () => {

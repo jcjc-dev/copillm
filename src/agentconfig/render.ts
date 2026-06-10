@@ -476,18 +476,64 @@ export default function activate(pi: PiApi): void {
 }
 `;
 
-// ─── Copilot CLI (stub) ───────────────────────────────────────────────────
+// ─── Copilot CLI ──────────────────────────────────────────────────────────
 
-export function renderCopilot(_input: RenderInput): RenderResult {
+export function renderCopilot(input: RenderInput): RenderResult {
+  const writes: FileWrite[] = [];
+  const notes: string[] = [];
+  const cliArgs: string[] = [];
+
+  const mcpConfigPath = path.join(getCopillmHome(), "copilot", "mcp-config.json");
+  const serverCount = Object.keys(input.resolved.mcpServers).length;
+  if (serverCount > 0) {
+    const content = renderCopilotMcp(input.resolved.mcpServers);
+    const existing = fs.existsSync(mcpConfigPath) ? fs.readFileSync(mcpConfigPath, "utf8") : null;
+    if (existing !== content) {
+      writes.push({
+        path: mcpConfigPath,
+        content,
+        mode: 0o600,
+        description: "Copilot CLI MCP config (copillm-managed)"
+      });
+    }
+    cliArgs.push("--additional-mcp-config", `@${mcpConfigPath}`);
+  } else if (fs.existsSync(mcpConfigPath)) {
+    fs.rmSync(mcpConfigPath, { force: true });
+    notes.push(`Removed stale ${mcpConfigPath} (no MCP servers in active profile).`);
+  }
+
   return {
-    writes: [],
+    writes,
     envOverlay: {},
-    cliArgs: [],
-    notes: [
-      "Copilot CLI: native MCP config format is not yet documented publicly. " +
-        "Skipping fan-out. Track upstream and remove this stub when the path is known."
-    ]
+    cliArgs,
+    notes
   };
+}
+
+function renderCopilotMcp(servers: Record<string, McpServerEntry>): string {
+  const out: Record<string, unknown> = {};
+  for (const [name, server] of Object.entries(servers)) {
+    if (server.transport === "stdio") {
+      const entry: Record<string, unknown> = {
+        type: "local",
+        command: server.command,
+        tools: ["*"]
+      };
+      if (server.args) entry.args = server.args;
+      if (server.env) entry.env = server.env;
+      if (server.cwd) entry.cwd = server.cwd;
+      out[name] = entry;
+    } else {
+      const entry: Record<string, unknown> = {
+        type: server.transport,
+        url: server.url,
+        tools: ["*"]
+      };
+      if (server.headers) entry.headers = server.headers;
+      out[name] = entry;
+    }
+  }
+  return `${JSON.stringify({ mcpServers: out }, null, 2)}\n`;
 }
 
 // ─── Apply orchestrator ──────────────────────────────────────────────────
