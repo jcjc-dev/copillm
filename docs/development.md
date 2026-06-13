@@ -6,6 +6,21 @@ nav_order: 8
 
 # Development & CI
 
+## Contributing
+
+Bug reports and pull requests are welcome. The development loop is:
+
+1. **Build** — `npm install && npm run build` (see [Building from source](#building-from-source)).
+2. **Develop against an isolated dev daemon**, never your everyday copillm. `npm run dev:start` runs your build on a separate home and port, so it can neither disturb nor be disturbed by a production daemon (see [Isolated dev mode](#isolated-dev-mode-run-dev--prod-side-by-side)).
+3. **Validate before you push** — run the same checks CI enforces:
+
+   ```bash
+   npm run lint && npm test && npm run test:e2e:pr
+   ```
+
+   They are hermetic (a mock Copilot backend plus a throwaway config home), so they need no GitHub or Copilot credentials.
+4. **Open a pull request** — `pr-gate` re-runs those checks on a 6-cell matrix (Linux / macOS / Windows × Node 20 / 22). Rebase on the latest `main` first; pull requests are squash-merged.
+
 ## Building from source
 
 ```bash
@@ -82,7 +97,7 @@ re-authentication.
 > never touches your real `~/.claude` / `~/.codex` / `~/.pi`, and can run
 > alongside a production-powered agent.
 
-## Tests
+## Validating your changes
 
 ```bash
 npm run lint
@@ -91,7 +106,7 @@ npm run test:e2e:pr        # synthetic Codex/Claude clients, no external install
 npm run test:e2e:release   # installs latest @openai/codex + @anthropic-ai/claude-code
 ```
 
-The mock backend (`tests/mock-backend/`) serves a fictional model catalog (`claude-test-opus`, `claude-test-sonnet`, `claude-test-haiku`, `gpt-test`, `gpt-test-codex`) so tests are hermetic and require no GitHub or Copilot credentials.
+The e2e runners are hermetic — they spin up a mock Copilot backend with a fictional model catalog, so they require no GitHub or Copilot credentials.
 
 ## CI: PR gate, upstream e2e, and the release pipeline
 
