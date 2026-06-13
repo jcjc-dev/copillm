@@ -28,7 +28,7 @@ export function loadConfig(): AppConfig {
   const file = configReadPath();
   if (!fs.existsSync(file)) {
     saveConfig(DEFAULT_CONFIG);
-    return DEFAULT_CONFIG;
+    return applyEnvOverrides(DEFAULT_CONFIG);
   }
   const raw = readFileSync(file, "utf8");
   let parsed: unknown;
@@ -37,7 +37,7 @@ export function loadConfig(): AppConfig {
   } catch (error) {
     throw new Error(`Invalid YAML in config file: ${file}`, { cause: error });
   }
-  return parseConfigValue(parsed, file);
+  return applyEnvOverrides(parseConfigValue(parsed, file));
 }
 
 export function saveConfig(config: AppConfig): void {
@@ -54,4 +54,18 @@ function parseConfigValue(value: unknown, source: string): AppConfig {
   }
   const issues = result.error.issues.map((issue) => `${issue.path.join(".") || "<root>"}: ${issue.message}`).join("; ");
   throw new Error(`Invalid config schema in ${source}: ${issues}`);
+}
+
+function applyEnvOverrides(config: AppConfig): AppConfig {
+  const port = process.env.COPILLM_PORT;
+  if (port === undefined || port.trim().length === 0) {
+    return config;
+  }
+
+  const parsedPort = Number(port.trim());
+  if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+    throw new Error("Invalid COPILLM_PORT: expected an integer between 1 and 65535.");
+  }
+
+  return { ...config, preferredPort: parsedPort };
 }
