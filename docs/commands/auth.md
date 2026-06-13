@@ -7,9 +7,9 @@ nav_order: 1
 
 # `copillm auth`
 
-Authentication against GitHub Copilot uses the GitHub device flow. Credentials are stored in the OS keychain via [`@napi-rs/keyring`](https://github.com/Brooooooklyn/keyring-node) (Keychain on macOS, Credential Manager on Windows, libsecret on Linux); the token is never written to disk in plaintext and never printed to stdout or logs.
+Authentication against GitHub Copilot uses the GitHub device flow. Credentials are stored in your OS keychain (Keychain on macOS, Credential Manager on Windows, libsecret on Linux); the token is never written to disk in plaintext and never printed to stdout or logs.
 
-> **Upgrading from copillm ≤ 0.2.1:** the underlying keychain library changed from `keytar` to `@napi-rs/keyring`. On macOS you may see a one-time "copillm wants to access your keychain" prompt when the new binary first reads the existing credential. On Linux the secret-service attribute schema differs from keytar's, so you will need to run `copillm auth login` once to migrate.
+> **Upgrading from copillm ≤ 0.2.1:** the credential storage backend changed. On macOS you may see a one-time "copillm wants to access your keychain" prompt the first time the new version reads your existing credential. On Linux, run `copillm auth login` once to re-store the token under the new backend.
 
 ## `copillm auth login`
 

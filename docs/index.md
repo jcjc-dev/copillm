@@ -26,9 +26,11 @@ Any tool that speaks the OpenAI Chat Completions or Anthropic Messages wire form
 ```bash
 npm install -g copillm   # or use `npx copillm ...` below
 
-copillm login    # one-time GitHub device-flow login
-copillm claude   # launches Claude Code, fully wired
-copillm codex    # launches Codex CLI, fully wired
+copillm auth login   # one-time GitHub device-flow login
+copillm claude       # launches Claude Code, fully wired
+copillm codex        # launches Codex CLI, fully wired
+copillm copilot      # launches GitHub Copilot CLI with your stored token
+copillm pi           # launches the pi coding agent, fully wired
 ```
 
 copillm will:
@@ -48,7 +50,7 @@ copillm will:
 ## Documentation
 
 - **[Getting started](getting-started/)** — installation, authentication, first run
-- **[Commands](commands/)** — every command, grouped by domain (`auth`, `claude`, `codex`, `daemon`, `models`, `env`)
+- **[Commands](commands/)** — every command, grouped by domain (`auth`, `claude`, `codex`, `copilot`, `pi`, `daemon`, `env`, `models`, `config`)
 - **[Using with Claude Code](claude-code/)** — environment wiring and the `[1m]` 1M-context alias
 - **[Using with Codex CLI](codex/)** — environment wiring and `config.toml` generation
 - **[MCP & `agent.toml`](mcp/)** — declare MCP servers once, fan out to every agent

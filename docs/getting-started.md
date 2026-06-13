@@ -24,17 +24,17 @@ Or invoke it on demand with `npx` (no global install needed). For repeatable aut
 ## 1. Log in
 
 ```bash
-copillm login
+copillm auth login
 ```
 
-This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `github.com/login/device`. The resulting token is stored in your OS keychain (via [`keytar`](https://github.com/atom/node-keytar)) when available, otherwise in `~/.copillm/credentials.json` with 0600 perms.
+This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `github.com/login/device`. The resulting token is stored in your OS keychain when available, otherwise in `~/.copillm/credentials.json` with 0600 perms.
 
 Verify with:
 
 ```bash
 copillm auth status
 # stored: true
-# backend: keytar
+# backend: keyring
 # user: { login: "your-handle", name: "Your Name" }
 ```
 
@@ -47,6 +47,8 @@ The fastest path — copillm auto-starts the daemon and installs the agent on de
 ```bash
 copillm claude     # launches Claude Code
 copillm codex      # launches Codex CLI
+copillm copilot    # launches GitHub Copilot CLI (reuses your stored token)
+copillm pi         # launches the pi coding agent
 ```
 
 Extra args are forwarded to the underlying agent:
@@ -73,6 +75,6 @@ Default bind is `http://127.0.0.1:4141`.
 
 ## Next steps
 
-- See the [CLI reference](../cli-reference/) for every command and flag
+- See the [command reference](../commands/) for every command and flag
 - Read the [Claude Code](../claude-code/) or [Codex](../codex/) guide for manual wiring and advanced tuning
 - Check the [HTTP API reference](../http-api/) if you want to point your own scripts or third-party tools at copillm
