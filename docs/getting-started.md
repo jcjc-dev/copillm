@@ -27,7 +27,7 @@ Or invoke it on demand with `npx` (no global install needed). For repeatable aut
 copillm auth login
 ```
 
-This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `github.com/login/device`. The resulting token is stored in your OS keychain (via [`@napi-rs/keyring`](https://github.com/Brooooooklyn/keyring-node)) when available, otherwise in `~/.copillm/credentials.json` with 0600 perms.
+This kicks off GitHub's device-flow OAuth — you'll see a code to paste into `github.com/login/device`. The resulting token is stored in your OS keychain when available, otherwise in `~/.copillm/credentials.json` with 0600 perms.
 
 Verify with:
 

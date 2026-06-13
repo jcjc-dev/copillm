@@ -43,7 +43,7 @@ That writes the provider environment into `~/.claude/settings.json` and syncs th
 
 - `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` — point Claude Code at the local copillm proxy
 - `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` — Claude Code resolves the `opus`/`sonnet`/`haiku` aliases (used by `/model` selections, `claude --model opus`, and background haiku-class tasks) to these specific Copilot variants client-side
-- `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` — Claude Code v2.1.129+ calls our `/anthropic/v1/models` endpoint at startup and populates the `/model` picker with every eligible Copilot model. Eligibility is capability-based (`model_picker_enabled`, policy state, and `/chat/completions` support) rather than name-based, so non-Claude variants like Gemini and GPT appear too. Each appears labelled "From gateway"
+- `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` — Claude Code v2.1.129+ calls our `/anthropic/v1/models` endpoint at startup and populates the `/model` picker with every Copilot model you're entitled to that supports chat — not just Claude-branded ones, so Gemini and GPT variants appear too. Each appears labelled "From gateway"
 
 Override any env var in your shell (e.g. `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7-high`) to pick a different Copilot variant. The `copillm claude` launcher does not persist Anthropic preferences; only `copillm config sync --agent claude` writes native Claude settings.
 
