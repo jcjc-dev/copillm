@@ -1,11 +1,11 @@
 import fs from "node:fs";
 
 /**
- * Pi-flavored client. Unlike codex/claude, pi has no env-var override for its
- * config dir — at launch it reads `<HOME>/.pi/agent/models.json` and uses the
- * `baseUrl` + `apiKey` from the first matching provider. We mirror that path
- * exactly here so the e2e test exercises the same wiring a real pi launch
- * would.
+ * Pi-flavored client. copillm owns pi's config dir via the `PI_CODING_AGENT_DIR`
+ * override, so at launch pi reads `<PI_CODING_AGENT_DIR>/models.json` (under
+ * COPILLM_HOME) and uses the `baseUrl` + `apiKey` from the first matching
+ * provider. We mirror that path exactly here so the e2e test exercises the same
+ * wiring a real pi launch would.
  */
 
 export interface PiProviderConfig {

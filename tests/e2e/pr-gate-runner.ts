@@ -185,9 +185,9 @@ async function main(): Promise<void> {
     });
 
     await runScenario(failures, "pi-config-written", async () => {
-      // `copillm start` (via spawn-copillm) writes ~/.pi/agent/models.json into
-      // the daemon's isolated $HOME. Verify it actually landed and is well-formed.
-      const configPath = path.join(daemon!.fakeHome, ".pi", "agent", "models.json");
+      // `copillm start` writes pi's models.json under the copillm-owned pi agent
+      // dir ($COPILLM_HOME/pi/agent), NOT the user's ~/.pi. Verify it landed.
+      const configPath = path.join(seeded!.copillmHome, "pi", "agent", "models.json");
       if (!fs.existsSync(configPath)) {
         throw new Error(`expected pi models.json at ${configPath}; daemon may not have written it`);
       }
@@ -228,7 +228,7 @@ async function main(): Promise<void> {
     await runScenario(failures, "pi-chat-streaming", async () => {
       // Drive the exact path pi takes at launch: read models.json, then POST to
       // the configured baseUrl. This validates the wiring end-to-end.
-      const configPath = path.join(daemon!.fakeHome, ".pi", "agent", "models.json");
+      const configPath = path.join(seeded!.copillmHome, "pi", "agent", "models.json");
       const cfg = readPiModelsConfig(configPath);
       const provider = pickPiProvider(cfg, "copillm");
       const result = await piLikeChat({
@@ -294,8 +294,9 @@ async function main(): Promise<void> {
     });
 
     await runScenario(failures, "env-pi-prints-block", async () => {
-      // `copillm env pi` regenerates pi's models.json into the caller's $HOME.
-      // Point HOME at a throwaway dir to avoid clobbering the developer's real one.
+      // `copillm env pi` regenerates pi's models.json under the copillm-owned pi
+      // agent dir (COPILLM_HOME/pi/agent). Point HOME at a throwaway dir to prove
+      // copillm no longer touches the developer's real ~/.pi.
       const piEnvHome = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-pi-env-"));
       try {
         const out = await runCli(["env", "pi"], {
@@ -307,13 +308,16 @@ async function main(): Promise<void> {
           USERPROFILE: piEnvHome
         });
         assertEquals(out.status, 0, `env pi should exit 0 (got ${out.status}); stderr=${out.stderr}`);
-        if (!out.stdout.includes("# pi") && !out.stdout.includes("pi reads ~/.pi/agent/models.json")) {
+        if (!out.stdout.includes("# pi") && !out.stdout.includes("PI_CODING_AGENT_DIR")) {
           throw new Error(`expected pi env block (header or trailing note); got:\n${out.stdout}`);
         }
-        // Verify the side effect: models.json should now live under the fake HOME.
-        const configPath = path.join(piEnvHome, ".pi", "agent", "models.json");
+        // Verify the side effect: models.json lives under COPILLM_HOME, not ~/.pi.
+        const configPath = path.join(seeded!.copillmHome, "pi", "agent", "models.json");
         if (!fs.existsSync(configPath)) {
-          throw new Error(`env pi should regenerate ~/.pi/agent/models.json under fake HOME; missing at ${configPath}`);
+          throw new Error(`env pi should regenerate the copillm-owned models.json; missing at ${configPath}`);
+        }
+        if (fs.existsSync(path.join(piEnvHome, ".pi"))) {
+          throw new Error(`env pi must not touch the real ~/.pi (found one under ${piEnvHome})`);
         }
         const cfg = readPiModelsConfig(configPath);
         pickPiProvider(cfg, "copillm");
@@ -342,8 +346,9 @@ async function main(): Promise<void> {
         };
         assertEquals(parsed.agent, "pi", "json agent field should be pi");
         assertEquals(parsed.package, "@earendil-works/pi-coding-agent", "package should be pi npm name");
-        if (!parsed.pi_config_path || !parsed.pi_config_path.endsWith(path.join(".pi", "agent", "models.json"))) {
-          throw new Error(`pi_config_path should end with .pi/agent/models.json; got ${parsed.pi_config_path}`);
+        const expectedPiPath = path.join(seeded!.copillmHome, "pi", "agent", "models.json");
+        if (!parsed.pi_config_path || path.resolve(parsed.pi_config_path) !== path.resolve(expectedPiPath)) {
+          throw new Error(`pi_config_path should be the copillm-owned ${expectedPiPath}; got ${parsed.pi_config_path}`);
         }
         if (typeof parsed.pi_model_count !== "number" || parsed.pi_model_count <= 0) {
           throw new Error(`pi_model_count should be > 0; got ${parsed.pi_model_count}`);
@@ -394,9 +399,9 @@ async function runLauncherScenarios(
         const capturePath = path.join(scenarioDir, "capture.json");
         const stub = createAgentStub({ dir: scenarioDir, agent, capturePath });
 
-        // Pi has no env-var override for its config dir; redirect HOME so its
-        // launch-time read of ~/.pi/agent/models.json hits the seeded daemon
-        // copy rather than the developer's real home.
+        // copillm sets PI_CODING_AGENT_DIR so pi reads the copillm-owned
+        // models.json; HOME is still redirected defensively so the stub never
+        // sees the developer's real home.
         const extraEnv: Record<string, string> = agent === "pi"
           ? { HOME: daemon.fakeHome, USERPROFILE: daemon.fakeHome }
           : {};
@@ -433,15 +438,22 @@ async function runLauncherScenarios(
           if (capture.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY !== "1") {
             throw new Error("expected gateway flag to be forwarded to claude stub");
           }
+          // copillm owns Claude's config home: copillm-launched Claude must point
+          // at COPILLM_HOME/claude/home, never the user's real ~/.claude.
+          const expectedClaudeDir = path.join(seeded.copillmHome, "claude", "home");
+          if (capture.env.CLAUDE_CONFIG_DIR !== expectedClaudeDir) {
+            throw new Error(`CLAUDE_CONFIG_DIR should be copillm-owned ${expectedClaudeDir}; got ${capture.env.CLAUDE_CONFIG_DIR}`);
+          }
         } else {
-          // pi: copillm forwards no env vars; instead it must have refreshed
-          // ~/.pi/agent/models.json under the fake HOME before exec'ing pi.
-          const configPath = path.join(daemon.fakeHome, ".pi", "agent", "models.json");
+          // pi: copillm owns pi's config dir via PI_CODING_AGENT_DIR and must
+          // have refreshed models.json there (under COPILLM_HOME) before exec.
+          const expectedAgentDir = path.join(seeded.copillmHome, "pi", "agent");
+          const configPath = path.join(expectedAgentDir, "models.json");
           if (!fs.existsSync(configPath)) {
             throw new Error(`copillm pi launcher should refresh models.json at ${configPath}`);
           }
-          if (capture.env.HOME !== daemon.fakeHome) {
-            throw new Error(`pi stub should inherit fake HOME=${daemon.fakeHome}; got ${capture.env.HOME}`);
+          if (capture.env.PI_CODING_AGENT_DIR !== expectedAgentDir) {
+            throw new Error(`pi stub should inherit PI_CODING_AGENT_DIR=${expectedAgentDir}; got ${capture.env.PI_CODING_AGENT_DIR}`);
           }
         }
         if (!out.stderr.includes("system PATH")) {

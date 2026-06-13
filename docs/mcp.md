@@ -146,7 +146,7 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ### Claude Code
 
-- `copillm claude` writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` and appends `--mcp-config` for that launch.
+- `copillm claude` writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` and appends `--mcp-config` for that launch. It also points Claude at a copillm-owned config home via `CLAUDE_CONFIG_DIR` (`~/.copillm/claude/home`), so the launch never reads or writes your real `~/.claude`.
 - `copillm config sync --agent claude` writes MCP servers into user scope at `~/.claude.json` and writes copillm's provider env into `~/.claude/settings.json`.
 - When the active profile declares no MCP servers, the managed file is removed and no `--mcp-config` flag is added.
 - Instructions fan-out is **not supported** for Claude. Place project guidance in your own `CLAUDE.md` or global guidance in `~/.claude/CLAUDE.md`.
@@ -160,7 +160,8 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ### pi
 
-- Writes a `copillm-mcp` extension into `~/.pi/agent/extensions/copillm-mcp/` (`servers.json` + `index.ts`).
+- copillm points pi at a copillm-owned agent dir via `PI_CODING_AGENT_DIR` (`~/.copillm/pi/agent`), so it never writes your real `~/.pi`. To launch `pi` directly (without copillm), export `PI_CODING_AGENT_DIR` to that path first.
+- Writes a `copillm-mcp` extension into `~/.copillm/pi/agent/extensions/copillm-mcp/` (`servers.json` + `index.ts`).
 - v1 lists servers via a `/copillm-mcp` slash command; full stdio/http transport wiring is deferred to a follow-up.
 
 ### Copilot CLI

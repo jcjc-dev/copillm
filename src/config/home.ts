@@ -46,6 +46,42 @@ export function debugLogPath(): string {
   return path.join(getCopillmHome(), "debug.log");
 }
 
+/**
+ * The directory pi (`@earendil-works/pi-coding-agent`) reads its config from.
+ *
+ * pi exposes this via the `PI_CODING_AGENT_DIR` env var — its own `getAgentDir()`
+ * treats the value as the agent dir directly (equivalent to `~/.pi/agent`).
+ * copillm owns this path: it defaults to `<COPILLM_HOME>/pi/agent` so copillm
+ * never writes into the user's real `~/.pi`, and dev mode relocates it for free
+ * via COPILLM_HOME. An explicitly-set `PI_CODING_AGENT_DIR` always wins.
+ */
+export function piAgentDir(): string {
+  const overridden = process.env.PI_CODING_AGENT_DIR;
+  if (overridden && overridden.trim().length > 0) {
+    return path.resolve(overridden.trim());
+  }
+  return path.join(getCopillmHome(), "pi", "agent");
+}
+
+/**
+ * The config home Claude Code reads (its `~/.claude` equivalent), exposed by
+ * Claude Code as the `CLAUDE_CONFIG_DIR` env var.
+ *
+ * copillm owns this path: it defaults to `<COPILLM_HOME>/claude/home` and copillm
+ * exports `CLAUDE_CONFIG_DIR` to it when launching Claude (see
+ * `buildClaudeEnvBundle`). This keeps copillm out of the user's real `~/.claude`
+ * — copillm-launched Claude gets a deterministic, copillm-owned config home, and
+ * dev mode relocates it for free via COPILLM_HOME. An explicitly-set
+ * `CLAUDE_CONFIG_DIR` always wins.
+ */
+export function claudeConfigDir(): string {
+  const overridden = process.env.CLAUDE_CONFIG_DIR;
+  if (overridden && overridden.trim().length > 0) {
+    return path.resolve(overridden.trim());
+  }
+  return path.join(getCopillmHome(), "claude", "home");
+}
+
 function resolveReadablePath(fileName: string): string {
   const canonical = path.join(getCopillmHome(), fileName);
   if (fs.existsSync(canonical)) {

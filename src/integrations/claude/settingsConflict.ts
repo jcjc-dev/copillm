@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import os from "node:os";
+import { claudeConfigDir } from "../../config/home.js";
 import path from "node:path";
 
 export interface SettingsEnvConflict {
@@ -16,7 +16,10 @@ export interface DetectSettingsConflictsResult {
 }
 
 export function claudeSettingsPath(): string {
-  return path.join(os.homedir(), ".claude", "settings.json");
+  // copillm-launched Claude reads settings from its copillm-owned config home
+  // (CLAUDE_CONFIG_DIR), so the conflict check inspects that file — not the
+  // user's real ~/.claude/settings.json.
+  return path.join(claudeConfigDir(), "settings.json");
 }
 
 export function detectClaudeSettingsConflicts(

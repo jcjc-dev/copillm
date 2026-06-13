@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import path from "node:path";
 import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle } from "../../../src/cli/agentEnv.js";
 
 describe("buildClaudeEnvBundle", () => {
@@ -13,6 +14,24 @@ describe("buildClaudeEnvBundle", () => {
     expect(bundle.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBe("1");
     expect(bundle.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-4.7");
     expect(bundle.trailingNotes).toEqual([]);
+  });
+
+  it("points CLAUDE_CONFIG_DIR at the copillm-owned config home", () => {
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, "tmp", "claude-home");
+    try {
+      const bundle = buildClaudeEnvBundle({
+        port: 4141,
+        callerSecret: null,
+        defaults: { opus: null, sonnet: null, haiku: null }
+      });
+      // An explicit CLAUDE_CONFIG_DIR wins (resolved), so copillm-launched Claude
+      // never reads the user's real ~/.claude.
+      expect(bundle.env.CLAUDE_CONFIG_DIR).toBe(path.resolve(path.join(path.sep, "tmp", "claude-home")));
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved;
+    }
   });
 
   it("uses the caller secret when provided", () => {
@@ -50,16 +69,23 @@ describe("buildCodexEnvBundle", () => {
 });
 
 describe("buildPiEnvBundle", () => {
-  it("returns an empty env bundle with explanatory trailing notes", () => {
-    // pi has no env var override for its config dir; the bundle's role is
-    // purely documentary. Anyone reading this test must update both the
-    // implementation and these expectations together.
+  const saved = process.env.PI_CODING_AGENT_DIR;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = saved;
+  });
+
+  it("exports PI_CODING_AGENT_DIR pointing at the copillm-owned pi agent dir", () => {
+    // copillm owns pi's config dir via PI_CODING_AGENT_DIR (pi added this
+    // override; copillm no longer writes the user's real ~/.pi). Anyone reading
+    // this test must update both the implementation and these expectations.
+    process.env.PI_CODING_AGENT_DIR = path.join(path.sep, "tmp", "pi-agent");
     const bundle = buildPiEnvBundle("/tmp/pi");
-    expect(bundle.env).toEqual({});
+    expect(bundle.env).toEqual({ PI_CODING_AGENT_DIR: path.resolve(path.join(path.sep, "tmp", "pi-agent")) });
     expect(bundle.inlineComments).toEqual({});
     expect(bundle.trailingNotes.length).toBeGreaterThan(0);
-    // The notes must reference both pi's hardcoded path and the mirror dir.
-    expect(bundle.trailingNotes.some((n) => n.includes("~/.pi/agent/models.json"))).toBe(true);
+    // The notes must reference the env var copillm sets and the mirror dir.
+    expect(bundle.trailingNotes.some((n) => n.includes("PI_CODING_AGENT_DIR"))).toBe(true);
     expect(bundle.trailingNotes.some((n) => n.includes("/tmp/pi/models.json"))).toBe(true);
   });
 });
