@@ -4,6 +4,17 @@ import type { AccountType } from "../types/index.js";
 import { ensureAppHome } from "../config/config.js";
 import { accountsIndexPath, accountsIndexReadPath } from "../config/home.js";
 import { writeFileSecureAtomic } from "../config/fsSecurity.js";
+import {
+  ACCOUNT_ID_PATTERN,
+  MAX_ACCOUNT_ID_LENGTH,
+  assertValidAccountId,
+  InvalidAccountIdError
+} from "../config/accountId.js";
+
+// Re-exported for callers that historically imported account-id validation
+// from this module (e.g. `credentials.ts`). The canonical definition now lives
+// in `config/accountId.ts` so the `models` layer can share it.
+export { assertValidAccountId, InvalidAccountIdError };
 
 /**
  * The `accounts.json` index records *which* GitHub accounts copillm knows
@@ -46,10 +57,8 @@ export interface AccountsIndex {
 
 // GitHub logins are `[A-Za-z0-9-]` and copillm allows `.` / `_` for synthetic
 // ids. The id is embedded in a filename (`credentials.<id>.json`) and a
-// keychain account string, so reject anything that could escape a path segment
-// or collide with the reserved legacy slot.
-const ACCOUNT_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const MAX_ACCOUNT_ID_LENGTH = 64;
+// keychain account string; the canonical validation lives in
+// `config/accountId.ts` (shared with the models layer).
 
 const AccountRecordSchema = z.object({
   id: z.string().min(1).max(MAX_ACCOUNT_ID_LENGTH).regex(ACCOUNT_ID_PATTERN),
@@ -79,32 +88,6 @@ const AccountsIndexSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "accounts.json may declare at most one legacy-storage account." });
     }
   });
-
-export class InvalidAccountIdError extends Error {
-  public constructor(public readonly accountId: string, reason: string) {
-    super(`Invalid account id "${accountId}": ${reason}`);
-    this.name = "InvalidAccountIdError";
-  }
-}
-
-/**
- * Validate an account id before it is used in a filename or keychain key.
- * Throws `InvalidAccountIdError` on anything that isn't a safe path segment.
- */
-export function assertValidAccountId(accountId: string): void {
-  if (accountId.length === 0) {
-    throw new InvalidAccountIdError(accountId, "id must not be empty.");
-  }
-  if (accountId.length > MAX_ACCOUNT_ID_LENGTH) {
-    throw new InvalidAccountIdError(accountId, `id must be at most ${MAX_ACCOUNT_ID_LENGTH} characters.`);
-  }
-  if (!ACCOUNT_ID_PATTERN.test(accountId)) {
-    throw new InvalidAccountIdError(
-      accountId,
-      "id may only contain letters, digits, '.', '_' and '-', and must start with a letter or digit."
-    );
-  }
-}
 
 /**
  * Read and validate the accounts index. Returns `null` when no index exists

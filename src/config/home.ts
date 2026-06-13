@@ -69,6 +69,20 @@ export function modelsCacheReadPath(): string {
   return resolveReadablePath("models.cache.json");
 }
 
+/**
+ * Per-account model-discovery cache. Different accounts can be entitled to
+ * different model catalogs, so each named account caches into its own
+ * `models.cache.<id>.json`. The primary/legacy account keeps the shared
+ * `models.cache.json` (above), so single-account installs are unaffected.
+ */
+export function accountModelsCachePath(accountId: string): string {
+  return path.join(getCopillmHome(), `models.cache.${accountId}.json`);
+}
+
+export function accountModelsCacheReadPath(accountId: string): string {
+  return resolveReadablePath(`models.cache.${accountId}.json`);
+}
+
 export function debugLogPath(): string {
   return path.join(getCopillmHome(), "debug.log");
 }
