@@ -15,67 +15,101 @@ This is an **independent, unofficial client** of GitHub Copilot — not affiliat
 - HTTP: use the standard library — Node ships `fetch`/`Response`/`Headers` as globals; no third-party HTTP client is needed.
 - Validation: `zod`
 - Config format: YAML (`yaml` package) for `~/.copillm/config.yaml`, TOML for the generated Codex config
-- Tests: `vitest` (unit), custom Node runners for E2E (`tests/e2e/`)
+- Tests: `vitest` (unit + integration, laid out to mirror `src/`), custom Node runners for E2E (`tests/e2e/`)
 - Logger: `pino` with structured JSON
+- Architecture: `src/` is split into layered modules; cross-module imports are enforced by `eslint-plugin-boundaries` (`eslint.config.js`) — see Conventions
 
 ## Commands you should use
 
 ```bash
 npm run build              # tsc -p tsconfig.json
-npm run lint               # tsc --noEmit on src/ AND tests/
-npm test                   # vitest run (unit tests)
+npm run lint               # tsc --noEmit on src/ AND tests/, then eslint src (import-boundary check)
+npm run lint:boundaries    # just the eslint-plugin-boundaries layering check on src/
+npm test                   # vitest run (unit + integration); globalSetup builds dist/ first
 npm run test:e2e:pr        # mock backend + synthetic clients (fast)
 npm run test:e2e:release   # mock backend + real Codex + real Claude Code (installs via npx)
-node dist/cli.js start --detach    # run the daemon
+node dist/cli.js start --detach    # run the daemon (cli.js is a thin shim over src/cli/)
 node dist/cli.js stop              # stop daemon (clears Claude gateway cache too)
 node dist/cli.js status            # check daemon + bearer health
 ```
 
-When you run something on this repo, **prefer the npm scripts above over inferring fresh tooling commands**. The lint script type-checks `tests/` too via `tsconfig.tests.json`.
+When you run something on this repo, **prefer the npm scripts above over inferring fresh tooling commands**. `lint` type-checks `tests/` too (via `tsconfig.tests.json`) and runs the import-boundary lint; `test` auto-builds `dist/` via `tests/globalBuild.ts`.
 
 ## Repo layout
 
 ```
 src/
-  cli.ts                       # commander entry point (login/logout/start/stop/status/health/models)
+  cli.ts                       # thin shim — just `import "./cli/index.js"`
+  cli/                         # the CLI surface (split out of the old monolithic cli.ts)
+    index.ts                   # commander entry: registers every command + global flags (--debug, --no-update-notifier)
+    commands/
+      auth.ts                  # auth login | logout | status  (+ deprecated top-level login/logout)
+      daemon.ts                # start | stop | status | health  (+ internal `daemon`)
+      models.ts                # models list | select
+      env.ts                   # env <agent> — print env vars to launch codex/claude/pi against copillm
+      agents/                  # codex.ts claude.ts pi.ts copilot.ts shared.ts — the agent launchers
+    configCommands.ts          # config init | show | sync  and  config profile list | use
+    daemon/                    # ensureRunning, lifecycle, probes, runDaemon, selfSpawn, spawnEnv
+    integrations/              # banner + post-launch native-config refresh (claudeExport, refreshCodex, refreshPi)
+    shared/                    # backends, debug, deprecation, exitCodes, output, parseAgent
+    launchAgent.ts, resolveAgent.ts, updateNotifier.ts, windowsSpawn.ts, copillmFlags.ts, …
+  agents/
+    registry.ts                # per-agent capability registry: AgentName-keyed yolo specs + applyYolo()
   auth/                        # GitHub device flow, credential storage, Copilot token manager
   config/
     upstream.ts                # ALL upstream URLs go through here (see "Conventions" below)
-    home.ts, config.ts, fsSecurity.ts
+    home.ts, config.ts, fsSecurity.ts, logging.ts
+  integrations/                # agent-native config writers (moved out of src/codex, src/claude)
+    registry.ts                # AgentName union + npm package / bin name per agent (source of truth)
+    codex/init.ts              # generates ~/.copillm/codex/config.toml
+    claude/cache.ts            # clears ~/.claude/cache/gateway-models.json on stop
+    claude/settingsConflict.ts # detects (never writes) ~/.claude/settings.json conflicts
+    pi/init.ts                 # pi agent native config
   models/
     discovery.ts               # /models fetch + cache
     anthropicDefaults.ts       # auto-pick latest plain Claude variant per family
-  server/
-    proxy.ts                   # the HTTP daemon
-    codexSchema.ts             # buildCodexCatalog() filter for /codex/v1/models
+  server/                      # split out of the old monolithic proxy.ts
+    proxy.ts                   # thin HTTP router: wires routes + request lifecycle
+    routes/                    # debug, health, models, proxyForward, shared
+    upstream/                  # copilotClient, retryPolicy, streaming
+    codexSchema.ts             # isCodexEligible filter for /codex/v1/models
     anthropicModelsResponse.ts # Anthropic-spec /v1/models shape for gateway discovery
+    errors.ts, requestLifecycle.ts, debugInfo.ts, lock.ts
   translation/
     openaiAnthropic.ts                  # request body + non-streaming response translation
     streamingOpenAIToAnthropic.ts       # SSE translator (canonical Anthropic event sequence)
   agentconfig/
-    schema.ts                           # zod schemas for ~/.copillm/agent.toml
-    load.ts                             # parse + merge global + project TOML, env-expand
+    schema.ts                           # zod schemas for ~/.copillm/agent.toml (profiles, mcp, yolo)
+    load.ts                             # parse + merge defaults + active profile + project overlay, env-expand
     render.ts                           # per-agent renderers (codex/claude/pi/copilot)
     apply.ts                            # orchestrate load → render → write
     markerBlock.ts                      # marker-block upsert + backup-on-drift helpers
-  codex/init.ts                # generates ~/.copillm/codex/config.toml
-  claude/cache.ts              # clears ~/.claude/cache/gateway-models.json on stop
-tests/
-  *.test.ts                    # unit tests (vitest)
+  types/index.ts               # shared types — a dependency-free leaf (see the import-boundary layering)
+tests/                         # mirrors the src/ layout
+  unit/                        # vitest unit tests, grouped by src subtree
+  integration/                 # CLI-level integration tests (e.g. integration/authStatusCli.test.ts)
+  probes/                      # capability probes
+  helpers/                     # shared test harness helpers
   mock-backend/                # standalone HTTP server that mimics Copilot upstream
   e2e/
     pr-gate-runner.ts          # synthetic clients
     release-runner.ts          # real Codex + Claude Code via npx
-    clients/                   # codexLikeClient.ts, claudeLikeClient.ts
+    clients/                   # codexLikeClient.ts, claudeLikeClient.ts, piLikeClient.ts
 .github/
-  workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22
+  workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22 (lint + build + unit + e2e:pr)
   workflows/upstream-e2e.yml   # nightly cron + dispatch + invoked by release.yml as the publish gate
   workflows/release.yml        # version-bump triggered: detect → tag → gate → npm publish → GitHub Release
+  workflows/docs.yml, docs-pr.yml  # build (+ deploy) the Jekyll docs site
   rulesets/main.json           # blocks direct push to main + force-push + branch deletion
+docs/                          # Jekyll site published to jcjc-dev.github.io/copillm
+eslint.config.js               # import-boundary layering via eslint-plugin-boundaries (see Conventions)
 ```
 
 ## Conventions (enforce these)
 
+- **Respect the import-boundary layering.** `eslint.config.js` (run by `npm run lint`) treats each `src/` subfolder as an element and disallows cross-element imports except the explicitly-allowed edges. Today's shape: `types` is a dependency-free leaf; `config` → types; `models` and `agentconfig` → config + types; `server` → auth, models, translation, config, types; `integrations` → auth, config, models, server, types; `agents` → integrations; `cli` is the top element and may import anything. Don't add a new cross-element edge just to make something compile — prefer respecting the layering (e.g. park shared types in `src/types`). Widen the allow-map only deliberately, with a comment.
+- **Agents are registry-driven — four first-class agents: `codex`, `claude`, `pi`, `copilot`.** The `AgentName` union plus each agent's npm package + bin name live in `src/integrations/registry.ts` (the single source of truth); per-agent runtime behaviour (yolo mapping, …) lives in `src/agents/registry.ts`, keyed by the same union. Adding an agent = one row in each registry + a launcher module under `src/cli/commands/agents/` — never a fresh `if (agent === …)` branch in a handler.
+- **`--yolo` resolves through a precedence chain, never hardcoded at a call site.** Highest wins: `--yolo` flag → `COPILLM_YOLO` env (tri-state — explicit `0`/`false`/`no` vetoes config-driven yolo) → `agent.toml` `[profiles.<active>.yolo].agents.<agent>` → `.yolo.enabled` → off. Per-agent translation lives in `applyYolo` (`src/agents/registry.ts`): claude `--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, copilot `--allow-all`, pi unsupported (warns, forwards argv unchanged). Route decisions through `resolveYoloWithSource` + `applyYolo` so the unsupported-agent warning keeps its source attribution.
 - **All upstream URLs flow through `src/config/upstream.ts`.** Never hardcode `api.githubcopilot.com`, `api.github.com`, or any host. Production defaults live in `upstream.ts`; tests override via `COPILLM_UPSTREAM_BASE_URL`, `COPILLM_TOKEN_EXCHANGE_URL`, `COPILLM_GITHUB_USER_URL` env vars.
 - **Streaming SSE translation must preserve the canonical Anthropic event sequence**: `message_start → content_block_start → content_block_delta* → content_block_stop → message_delta → message_stop`. Tool-use blocks emit `input_json_delta` deltas. Don't reorder.
 - **Codex consumes `/codex/v1/models`** (Codex-shape catalog with `slug`, `display_name`, `supported_reasoning_levels`, etc.). Filter via `isCodexEligible` in `src/server/codexSchema.ts`: `model_picker_enabled === true` AND `policy.state === "enabled"` (or absent) AND `supported_endpoints` includes `/responses`.
@@ -86,19 +120,21 @@ tests/
 - **Loopback-only enforcement**: the proxy rejects non-`127.0.0.1` / `::1` requests with 403. Don't bind to `0.0.0.0`.
 - **Bearer tokens are memory-only**, never persisted to disk. The GitHub OAuth token persists (OS keychain, `~/.copillm/credentials.json` fallback, or in-memory `"session"` backend). Don't write bearers anywhere.
 - **Credential file fallback** is gated by `COPILLM_ALLOW_PLAINTEXT_CREDENTIALS=1` in non-TTY contexts. Don't relax this gate.
-- **`auth status` and the `status.auth` block never print the token.** They use `inspectStoredCredential()` (which reports presence + backend only), not `loadStoredCredential()` (which returns the token). `tests/authStatusCli.test.ts` enforces this with a substring-leak guard. Don't wire status surfaces through `loadStoredCredential`.
-- **Unified agent config lives in TOML at `~/.copillm/agent.toml` (global) and `<cwd>/.copillm/agent.toml` (project overlay).** The loader (`src/agentconfig/load.ts`) fails closed on duplicate TOML keys, schema violations, unresolved `${VAR}` expansions, and `mcpServers` name collisions between copillm-managed and user-owned entries. Renderers (`src/agentconfig/render.ts`) MUST preserve user-owned entries: Claude's `.mcp.json` keeps unrelated `mcpServers.*` and tracks copillm-owned names in a sibling `_copillmManaged` array; AGENTS.md / CLAUDE.md use the `<!-- copillm:managed begin -->` … `<!-- copillm:managed end -->` marker block. Compute every FileWrite in memory before touching disk — no partial writes on error.
+- **`auth status` and the `status.auth` block never print the token.** They use `inspectStoredCredential()` (which reports presence + backend only), not `loadStoredCredential()` (which returns the token). `tests/integration/authStatusCli.test.ts` enforces this with a substring-leak guard. Don't wire status surfaces through `loadStoredCredential`.
+- **Unified agent config lives in TOML at `~/.copillm/agent.toml` (global) and `<cwd>/.copillm/agent.toml` (project overlay).** It is profile-structured: `active_profile` selects a profile, `[defaults.*]` always applies, and `[profiles.<name>.*]` overrides same-keyed defaults; v1 wires `instructions`, `mcp`, and `yolo`, while `skills`/`agents`/`hooks`/`permissions` are reserved-but-permissive (validated, not yet rendered). The loader (`src/agentconfig/load.ts`) fails closed on duplicate TOML keys, schema violations, unresolved `${VAR}` expansions, and `mcpServers` name collisions between copillm-managed and user-owned entries. Renderers (`src/agentconfig/render.ts`) MUST preserve user-owned entries: Claude's `.mcp.json` keeps unrelated `mcpServers.*` and tracks copillm-owned names in a sibling `_copillmManaged` array; AGENTS.md / CLAUDE.md use the `<!-- copillm:managed begin -->` … `<!-- copillm:managed end -->` marker block. Compute every FileWrite in memory before touching disk — no partial writes on error.
 
 ## Test fixtures and naming
 
+- Tests mirror `src/`: unit tests in `tests/unit/<subtree>/`, CLI-level tests in `tests/integration/`, shared harness code in `tests/helpers/`, the mock upstream in `tests/mock-backend/`, and the E2E runners in `tests/e2e/`. Put a new test next to the layer it exercises.
 - All fictional models in `tests/mock-backend/fixtures.ts` use deliberately generic names: `claude-test-opus`, `claude-test-sonnet`, `claude-test-haiku`, `gpt-test`, `gpt-test-codex`. **Do not introduce real product names or version numbers in test fixtures.**
 - Test runs are hermetic: spawn the mock backend, seed a tmpdir-backed `COPILLM_HOME` with a fake GitHub token, point copillm at the mock via env-var overrides. Never make a test require real Copilot credentials.
 - `COPILLM_FORCE_SESSION_BACKEND=1` is a test-only seam that short-circuits the keychain detection in `src/auth/credentials.ts` and disables the plaintext-fallback gate, forcing the `auth login` flow to land on the in-memory `"session"` backend. Useful for exercising the session path deterministically on machines with a working keychain. Also exposed as a hidden `--force-session` flag on `auth login`. Not documented in the user-facing README.
 
 ## PR / commit workflow
 
+- **Start every change in a fresh git worktree synced to the latest `main`.** Multiple agents work this repo concurrently, so never edit in place on a shared checkout. Before you start: `git fetch origin`, then `git worktree add -b <type>/<slug> .claude/worktrees/<slug> origin/main` (worktrees live under the gitignored `.claude/worktrees/`). Always pull/sync the latest `main` first so your branch is based on current `origin/main`, not a stale local copy.
 - **Always raise a PR; never push or merge directly to `main`.** A ruleset config sits at `.github/rulesets/main.json` to formalize this, but it is not actively enforced on this private repo, so discipline is on us. Branch off `main`, push your feature branch, and open a PR — every time, including for trivial changes.
-- **Always rebase your feature branch onto latest `origin/main` before opening a PR.** Conflicts in this repo are usually trivial (different subtrees) but check anyway.
+- **Always rebase your feature branch onto latest `origin/main` before opening a PR.** Concurrent agents mean `main` may have moved since you branched; conflicts here are usually trivial (different subtrees) but check anyway.
 - **Run the full local pipeline before pushing**: `npm run lint && npm test && npm run test:e2e:pr`. The PR-gate workflow runs the same on every push to a 6-cell matrix.
 - **After pushing, watch CI in the background — don't block on it.** Spawn `gh pr checks <number> --watch` as an asynchronous/detached task using whatever background-execution primitive your environment provides (agent background-task tools, scheduled re-prompts, `setsid` / `nohup … &`, a detached shell session, etc.) so it can notify you when the matrix resolves rather than holding the session open. Fall back to a foreground `gh pr checks <number> --watch` only when no async mechanism is available. Either way, the work isn't finished until every matrix cell is green — if any cell fails, surface the failure to the user and fix it before handing off. Don't declare the task done while runs are queued or in-progress unless a background watcher is in place that will report the outcome back to the user when it resolves.
 - **Commit messages**: imperative subject ≤ 72 chars, blank line, then a body explaining the *why*. End with the project's `Co-authored-by: Copilot <...>` trailer when AI-assisted (handled by tooling, do not strip).
@@ -140,7 +176,9 @@ When investigating a misbehaving request or daemon, prefer the built-in debug su
 
 - Adding a third-party HTTP client — use Node's built-in `fetch`.
 - Hardcoding URLs — go through `src/config/upstream.ts`.
-- Touching `~/.claude/settings.json` or `~/.codex/config.toml` from copillm code. We document env-var workflows; we don't write into other tools' config.
+- Adding a cross-module import that forces you to widen `eslint.config.js`'s boundary allow-map just to compile — respect the layering instead.
+- Branching on agent name inside a handler instead of extending `src/integrations/registry.ts` + `src/agents/registry.ts`.
+- Writing into `~/.claude/settings.json` or `~/.codex/config.toml` from copillm code. We document env-var workflows and don't write into other tools' config; `src/integrations/claude/settingsConflict.ts` only *detects* conflicts. (Evicting the Claude gateway model *cache* on `stop` is the one deliberate exception.)
 - Adding a `model_catalog.json` file or `model_catalog_json` TOML key for Codex — discovery is live.
 - Adding `--keep-claude-cache` (or any other opt-out) to `copillm stop`.
 - Real product names or version numbers in `tests/mock-backend/fixtures.ts`.
