@@ -28,6 +28,18 @@ Alternatively, you can invoke it directly with `npx` without a global install:
 npx copillm --help
 ```
 
+### Preview (beta) releases
+
+Experimental builds are published to the `beta` channel ahead of a stable
+release. They let you try in-progress features early; expect rough edges. Stable
+installs are never affected unless you explicitly opt in:
+
+```bash
+npm install -g copillm@beta
+```
+
+To return to the stable channel, reinstall without the tag: `npm install -g copillm@latest`.
+
 ## Quick start
 
 ```bash
