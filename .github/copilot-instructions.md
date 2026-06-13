@@ -31,9 +31,18 @@ npm run test:e2e:release   # mock backend + real Codex + real Claude Code (insta
 node dist/cli.js start --detach    # run the daemon (cli.js is a thin shim over src/cli/)
 node dist/cli.js stop              # stop daemon (clears Claude gateway cache too)
 node dist/cli.js status            # check daemon + bearer health
+npm run dev:start          # ISOLATED dev daemon (--dev): ~/.copillm-dev + port 4142 — never touches prod
 ```
 
 When you run something on this repo, **prefer the npm scripts above over inferring fresh tooling commands**. `lint` type-checks `tests/` too (via `tsconfig.tests.json`) and runs the import-boundary lint; `test` auto-builds `dist/` via `tests/globalBuild.ts`.
+
+## Developing & verifying in isolation (dev mode)
+
+A globally-installed copillm may already be running on `~/.copillm` + port 4141. **Never develop or validate against it** — `stop` would kill the production daemon and `start` would just attach to it. Develop against an **isolated dev daemon** instead: the global `--dev` flag (or `COPILLM_DEV=1`) redirects the runtime onto `COPILLM_HOME=~/.copillm-dev` + port 4142 (overridable via `COPILLM_DEV_HOME` / `COPILLM_DEV_PORT`; an explicit `COPILLM_HOME`/`COPILLM_PORT` wins). The override rides the existing env seams, so it propagates to detached daemons **and** spawned agents — including each agent's copillm-owned config home (see Conventions). A dev daemon and dev agent launches therefore run side by side with production, and `copillm --dev stop` can never touch the production daemon or `~/.claude` / `~/.pi`.
+
+- Run / stop / inspect the dev daemon: `npm run dev:start` · `npm run dev:stop` · `npm run dev:status` (or `node dist/cli.js --dev <cmd>`). `start.sh` / `stop.sh` already pass `--dev`.
+- Manual smoke test: `node dist/cli.js --dev --debug start --detach`, then `curl http://127.0.0.1:4142/_debug | jq`. `node dist/cli.js --dev status --json` reports `copillm_home` + `dev_mode`.
+- Automated verification before pushing is unchanged and hermetic: `npm run lint && npm test && npm run test:e2e:pr` (each test seeds its own tmpdir `COPILLM_HOME`, so it never collides with a real daemon).
 
 ## Repo layout
 
@@ -62,9 +71,9 @@ src/
   integrations/                # agent-native config writers (moved out of src/codex, src/claude)
     registry.ts                # AgentName union + npm package / bin name per agent (source of truth)
     codex/init.ts              # generates ~/.copillm/codex/config.toml
-    claude/cache.ts            # clears ~/.claude/cache/gateway-models.json on stop
-    claude/settingsConflict.ts # detects (never writes) ~/.claude/settings.json conflicts
-    pi/init.ts                 # pi agent native config
+    claude/cache.ts            # clears the gateway-models cache (in copillm's owned Claude home) on stop
+    claude/settingsConflict.ts # detects (never writes) settings.json env conflicts
+    pi/init.ts                 # pi agent native config (written under PI_CODING_AGENT_DIR)
   models/
     discovery.ts               # /models fetch + cache
     anthropicDefaults.ts       # auto-pick latest plain Claude variant per family
@@ -116,7 +125,8 @@ eslint.config.js               # import-boundary layering via eslint-plugin-boun
 - **Claude Code consumes `/anthropic/v1/models`** (Anthropic spec shape: `{ data: [{ type: "model", id, display_name, created_at }], has_more, first_id, last_id }`). Eligibility is **capability-gated, not vendor-filtered**: `isAnthropicSurfaceEligible` in `src/server/anthropicModelsResponse.ts` requires `model_picker_enabled === true` AND `policy.state === "enabled"` (or absent) AND `supported_endpoints` includes `/chat/completions`. (The old `^(claude|anthropic)` id filter was deliberately removed — it dropped Gemini/GPT models the translation layer handles fine.) Opus models reporting `max_context_window_tokens >= 1_000_000` get a `[1m]` id alias, stripped back to the canonical id before forwarding upstream.
 - **Codex uses live discovery for its model catalog.** The generated `~/.copillm/codex/config.toml` carries only the provider routing block and the default `model` slug. Don't add a separate catalog file or any `model_catalog_json` setting — Codex fetches `<base_url>/models?client_version=…` at startup.
 - **The Codex CLI's `model_provider.base_url` is `http://127.0.0.1:<port>/codex/v1`**. Codex appends `/models` and `/responses` itself.
-- **`copillm stop` always clears `~/.claude/cache/gateway-models.json`.** This is intentional — Claude Code persists the gateway model picker across restarts otherwise. Don't add an opt-out flag.
+- **copillm points every launcher agent at a copillm-owned config home under `COPILLM_HOME`, never the agent's real default.** `copillm <agent>` exports `CODEX_HOME` (codex), `CLAUDE_CONFIG_DIR` (claude → `<COPILLM_HOME>/claude/home`), and `PI_CODING_AGENT_DIR` (pi → `<COPILLM_HOME>/pi/agent`), and passes Copilot's MCP via `--additional-mcp-config`; the gateway-cache clear and the settings-conflict read both resolve from the owned Claude home (helpers `claudeConfigDir()` / `piAgentDir()` in `src/config/home.ts`). So a launch never touches `~/.claude` / `~/.pi`, and `--dev` isolates full agent launches for free. The deliberate exception is `config sync --agent <agent>`, which writes the agent's **native** `~/.claude.json` / `~/.codex/config.toml` so the agent can be launched directly without copillm.
+- **`copillm stop` always clears the Claude gateway model-picker cache** (`gateway-models.json`, under copillm's owned Claude config home — see the bullet above). This is intentional — Claude Code persists the gateway model picker across restarts otherwise. Don't add an opt-out flag.
 - **Loopback-only enforcement**: the proxy rejects non-`127.0.0.1` / `::1` requests with 403. Don't bind to `0.0.0.0`.
 - **Bearer tokens are memory-only**, never persisted to disk. The GitHub OAuth token persists (OS keychain, `~/.copillm/credentials.json` fallback, or in-memory `"session"` backend). Don't write bearers anywhere.
 - **Credential file fallback** is gated by `COPILLM_ALLOW_PLAINTEXT_CREDENTIALS=1` in non-TTY contexts. Don't relax this gate.
@@ -178,7 +188,7 @@ When investigating a misbehaving request or daemon, prefer the built-in debug su
 - Hardcoding URLs — go through `src/config/upstream.ts`.
 - Adding a cross-module import that forces you to widen `eslint.config.js`'s boundary allow-map just to compile — respect the layering instead.
 - Branching on agent name inside a handler instead of extending `src/integrations/registry.ts` + `src/agents/registry.ts`.
-- Writing into `~/.claude/settings.json` or `~/.codex/config.toml` from copillm code. We document env-var workflows and don't write into other tools' config; `src/integrations/claude/settingsConflict.ts` only *detects* conflicts. (Evicting the Claude gateway model *cache* on `stop` is the one deliberate exception.)
+- Letting a `copillm <agent>` **launch** read or write the agent's real default home — launchers point each agent at a copillm-owned config home via `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `PI_CODING_AGENT_DIR` (see Conventions). `src/integrations/claude/settingsConflict.ts` only *detects* conflicts (never writes); only `config sync --agent <agent>` deliberately writes an agent's native config (`~/.claude.json` / `~/.codex/config.toml`) for a direct, copillm-less launch.
 - Adding a `model_catalog.json` file or `model_catalog_json` TOML key for Codex — discovery is live.
 - Adding `--keep-claude-cache` (or any other opt-out) to `copillm stop`.
 - Real product names or version numbers in `tests/mock-backend/fixtures.ts`.
