@@ -74,11 +74,13 @@ whole point. The GitHub login is shared via the OS keychain (a home-independent
 `copillm` service entry), so the dev daemon reuses your production login with no
 re-authentication.
 
-> **Agent launches:** the daemon, plus the Codex (`CODEX_HOME`) and Copilot
-> (`--additional-mcp-config`) configs, all live under `COPILLM_HOME`, so they are
-> fully isolated in dev mode. Claude Code (`~/.claude*`) and pi (`~/.pi`) still
-> render into your real home — fine for testing the daemon, but be aware those
-> two write shared agent config when you launch a full agent.
+> **Agent launches are isolated too.** copillm points every agent at a
+> copillm-owned config home under `COPILLM_HOME` and never writes the agents'
+> default paths: Codex via `CODEX_HOME`, Claude via `CLAUDE_CONFIG_DIR`, pi via
+> `PI_CODING_AGENT_DIR`, and Copilot via `--additional-mcp-config`. So `--dev`
+> isolates full agent launches as well — a dev `copillm claude`/`codex`/`pi`
+> never touches your real `~/.claude` / `~/.codex` / `~/.pi`, and can run
+> alongside a production-powered agent.
 
 ## Tests
 

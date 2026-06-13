@@ -438,6 +438,12 @@ async function runLauncherScenarios(
           if (capture.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY !== "1") {
             throw new Error("expected gateway flag to be forwarded to claude stub");
           }
+          // copillm owns Claude's config home: copillm-launched Claude must point
+          // at COPILLM_HOME/claude/home, never the user's real ~/.claude.
+          const expectedClaudeDir = path.join(seeded.copillmHome, "claude", "home");
+          if (capture.env.CLAUDE_CONFIG_DIR !== expectedClaudeDir) {
+            throw new Error(`CLAUDE_CONFIG_DIR should be copillm-owned ${expectedClaudeDir}; got ${capture.env.CLAUDE_CONFIG_DIR}`);
+          }
         } else {
           // pi: copillm owns pi's config dir via PI_CODING_AGENT_DIR and must
           // have refreshed models.json there (under COPILLM_HOME) before exec.

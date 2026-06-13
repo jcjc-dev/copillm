@@ -63,6 +63,25 @@ export function piAgentDir(): string {
   return path.join(getCopillmHome(), "pi", "agent");
 }
 
+/**
+ * The config home Claude Code reads (its `~/.claude` equivalent), exposed by
+ * Claude Code as the `CLAUDE_CONFIG_DIR` env var.
+ *
+ * copillm owns this path: it defaults to `<COPILLM_HOME>/claude/home` and copillm
+ * exports `CLAUDE_CONFIG_DIR` to it when launching Claude (see
+ * `buildClaudeEnvBundle`). This keeps copillm out of the user's real `~/.claude`
+ * — copillm-launched Claude gets a deterministic, copillm-owned config home, and
+ * dev mode relocates it for free via COPILLM_HOME. An explicitly-set
+ * `CLAUDE_CONFIG_DIR` always wins.
+ */
+export function claudeConfigDir(): string {
+  const overridden = process.env.CLAUDE_CONFIG_DIR;
+  if (overridden && overridden.trim().length > 0) {
+    return path.resolve(overridden.trim());
+  }
+  return path.join(getCopillmHome(), "claude", "home");
+}
+
 function resolveReadablePath(fileName: string): string {
   const canonical = path.join(getCopillmHome(), fileName);
   if (fs.existsSync(canonical)) {

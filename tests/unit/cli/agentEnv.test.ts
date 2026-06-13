@@ -16,6 +16,24 @@ describe("buildClaudeEnvBundle", () => {
     expect(bundle.trailingNotes).toEqual([]);
   });
 
+  it("points CLAUDE_CONFIG_DIR at the copillm-owned config home", () => {
+    const saved = process.env.CLAUDE_CONFIG_DIR;
+    process.env.CLAUDE_CONFIG_DIR = path.join(path.sep, "tmp", "claude-home");
+    try {
+      const bundle = buildClaudeEnvBundle({
+        port: 4141,
+        callerSecret: null,
+        defaults: { opus: null, sonnet: null, haiku: null }
+      });
+      // An explicit CLAUDE_CONFIG_DIR wins (resolved), so copillm-launched Claude
+      // never reads the user's real ~/.claude.
+      expect(bundle.env.CLAUDE_CONFIG_DIR).toBe(path.resolve(path.join(path.sep, "tmp", "claude-home")));
+    } finally {
+      if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = saved;
+    }
+  });
+
   it("uses the caller secret when provided", () => {
     const bundle = buildClaudeEnvBundle({
       port: 9999,

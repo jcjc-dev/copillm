@@ -35,7 +35,8 @@ export function createAgentStub(opts: { dir: string; agent: AgentName; capturePa
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
           "ANTHROPIC_DEFAULT_SONNET_MODEL",
           "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-          "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+          "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+          "CLAUDE_CONFIG_DIR"
         ];
 
   const jsScript =
@@ -89,7 +90,8 @@ export function buildAgentStubTarball(opts: {
           "ANTHROPIC_DEFAULT_OPUS_MODEL",
           "ANTHROPIC_DEFAULT_SONNET_MODEL",
           "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-          "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+          "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
+          "CLAUDE_CONFIG_DIR"
         ];
 
   const jsScript =

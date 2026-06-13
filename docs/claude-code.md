@@ -27,6 +27,7 @@ export ANTHROPIC_DEFAULT_OPUS_MODEL="claude-opus-4.7"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="claude-sonnet-4.6"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="claude-haiku-4.5"
 export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY="1"
+export CLAUDE_CONFIG_DIR="$HOME/.copillm/claude/home"
 ```
 
 Paste it into a shell, or `eval "$(copillm env claude)"` to load it into the current shell, then run `claude`. Use `copillm env claude --inline` for the legacy single-line form. `--shell fish` and `--shell powershell` are also supported.
@@ -44,6 +45,7 @@ That writes the provider environment into `~/.claude/settings.json` and syncs th
 - `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` — point Claude Code at the local copillm proxy
 - `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` — Claude Code resolves the `opus`/`sonnet`/`haiku` aliases (used by `/model` selections, `claude --model opus`, and background haiku-class tasks) to these specific Copilot variants client-side
 - `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` — Claude Code v2.1.129+ calls our `/anthropic/v1/models` endpoint at startup and populates the `/model` picker with every Copilot model you're entitled to that supports chat — not just Claude-branded ones, so Gemini and GPT variants appear too. Each appears labelled "From gateway"
+- `CLAUDE_CONFIG_DIR` — points Claude at a copillm-owned config home (`~/.copillm/claude/home`) instead of your real `~/.claude`. This keeps copillm-launched Claude deterministic and isolated (so dev and prod instances never collide), but it means your personal `~/.claude` settings, `CLAUDE.md`, and subagents do **not** apply to `copillm claude`. Run `copillm config sync --agent claude` if you want copillm's wiring in your real `~/.claude` for a direct `claude` launch.
 
 Override any env var in your shell (e.g. `ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7-high`) to pick a different Copilot variant. The `copillm claude` launcher does not persist Anthropic preferences; only `copillm config sync --agent claude` writes native Claude settings.
 

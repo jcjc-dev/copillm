@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { claudeConfigDir } from "../../config/home.js";
 
 export interface ClaudeCacheClearResult {
   cleared: boolean;
@@ -9,7 +9,10 @@ export interface ClaudeCacheClearResult {
 }
 
 export function claudeGatewayCachePath(): string {
-  return path.join(os.homedir(), ".claude", "cache", "gateway-models.json");
+  // Claude stores the gateway model-picker cache under its config home
+  // (CLAUDE_CONFIG_DIR). copillm owns that home, so we clear the copillm-owned
+  // copy — never the user's real ~/.claude.
+  return path.join(claudeConfigDir(), "cache", "gateway-models.json");
 }
 
 export function clearClaudeGatewayCache(): ClaudeCacheClearResult {

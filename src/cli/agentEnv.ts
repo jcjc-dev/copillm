@@ -3,7 +3,7 @@ import {
   readModelIdsFromCache,
   type AnthropicDefaults
 } from "../models/anthropicDefaults.js";
-import { piAgentDir } from "../config/home.js";
+import { claudeConfigDir, piAgentDir } from "../config/home.js";
 
 export interface ClaudeEnvBundle {
   env: Record<string, string>;
@@ -35,7 +35,10 @@ export function buildClaudeEnvBundle(input: {
 
   const env: Record<string, string> = {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${input.port}/anthropic`,
-    ANTHROPIC_AUTH_TOKEN: input.callerSecret ?? "copillm-local"
+    ANTHROPIC_AUTH_TOKEN: input.callerSecret ?? "copillm-local",
+    // Point Claude at a copillm-owned config home so copillm-launched Claude
+    // never reads/writes the user's real ~/.claude (and dev mode isolates it).
+    CLAUDE_CONFIG_DIR: claudeConfigDir()
   };
   const trailingNotes: string[] = [];
 
