@@ -26,6 +26,33 @@ export function credentialsReadPath(): string {
   return resolveReadablePath("credentials.json");
 }
 
+/**
+ * Path to the multi-account index (`accounts.json`). Metadata only — never
+ * holds a token. Absent on single-account installs, which keep using the
+ * legacy `credentials.json` / keychain entry as the implicit default account.
+ */
+export function accountsIndexPath(): string {
+  return path.join(getCopillmHome(), "accounts.json");
+}
+
+export function accountsIndexReadPath(): string {
+  return resolveReadablePath("accounts.json");
+}
+
+/**
+ * Plaintext-fallback credential file for a *named* (non-default) account. The
+ * default account keeps the legacy `credentials.json` path for backward
+ * compatibility; additional accounts are namespaced by id so their tokens
+ * never collide with — or overwrite — the pre-existing default.
+ */
+export function accountCredentialsPath(accountId: string): string {
+  return path.join(getCopillmHome(), `credentials.${accountId}.json`);
+}
+
+export function accountCredentialsReadPath(accountId: string): string {
+  return resolveReadablePath(`credentials.${accountId}.json`);
+}
+
 export function lockPath(): string {
   return path.join(getCopillmHome(), "copillm.pid");
 }
