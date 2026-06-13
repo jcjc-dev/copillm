@@ -31,6 +31,55 @@ npm link
 copillm status
 ```
 
+## Isolated dev mode (run dev + prod side by side)
+
+Running a locally-built copillm against the default `~/.copillm` home and port
+(4141) collides with a globally-installed production daemon: `stop` reads
+`~/.copillm/copillm.pid` and would kill the production daemon, and `start` sees
+the production lock and reports "already running" instead of launching your dev
+build.
+
+The global `--dev` flag (or `COPILLM_DEV=1`) redirects the runtime onto an
+isolated home so a dev daemon and a production daemon can run **at the same
+time** without ever touching each other's lock, config, model cache, or port:
+
+```bash
+node dist/cli.js --dev start --detach   # dev daemon: ~/.copillm-dev, port 4142
+node dist/cli.js --dev status           # only ever reports the dev daemon
+node dist/cli.js --dev stop             # only ever stops the dev daemon
+```
+
+Or use the npm scripts / wrapper shells, which rebuild `dist/` first and pass
+`--dev` for you:
+
+```bash
+npm run dev:start        # foreground dev daemon (add -- --detach for background)
+npm run dev:stop
+npm run dev:status
+./start.sh               # same as dev:start
+./stop.sh                # same as dev:stop
+```
+
+What `--dev` changes:
+
+- `COPILLM_HOME` → `~/.copillm-dev` (separate pid lock, `config.yaml`,
+  `models.cache.json`, `debug.log`, generated Codex/Copilot config).
+- `COPILLM_PORT` → `4142` (still auto-increments if busy).
+- Override the locations with `COPILLM_DEV_HOME` / `COPILLM_DEV_PORT`. An
+  explicitly-set `COPILLM_HOME` / `COPILLM_PORT` always wins.
+
+Because `stop` and `status` resolve the pid lock from `COPILLM_HOME`, a dev
+`stop` **cannot** terminate a production daemon under `~/.copillm` — that's the
+whole point. The GitHub login is shared via the OS keychain (a home-independent
+`copillm` service entry), so the dev daemon reuses your production login with no
+re-authentication.
+
+> **Agent launches:** the daemon, plus the Codex (`CODEX_HOME`) and Copilot
+> (`--additional-mcp-config`) configs, all live under `COPILLM_HOME`, so they are
+> fully isolated in dev mode. Claude Code (`~/.claude*`) and pi (`~/.pi`) still
+> render into your real home — fine for testing the daemon, but be aware those
+> two write shared agent config when you launch a full agent.
+
 ## Tests
 
 ```bash

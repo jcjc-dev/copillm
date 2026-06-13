@@ -10,6 +10,7 @@ import * as claudeCmd from "./commands/agents/claude.js";
 import * as piCmd from "./commands/agents/pi.js";
 import * as copilotCmd from "./commands/agents/copilot.js";
 import { setRootLogger, setRootProgram } from "./shared/debug.js";
+import { applyDevModeEnv } from "./shared/devMode.js";
 import { getPackageInfo } from "./packageInfo.js";
 import { maybeNotifyAboutUpdate } from "./updateNotifier.js";
 
@@ -18,13 +19,29 @@ const program = new Command();
 setRootProgram(program);
 setRootLogger(logger);
 
+// Honor COPILLM_DEV before anything reads COPILLM_HOME (e.g. the update
+// notifier). The `--dev` flag form is applied later, in the preAction hook,
+// once commander has parsed global options.
+applyDevModeEnv();
+
 const pkg = getPackageInfo();
 await maybeNotifyAboutUpdate({ packageInfo: pkg });
 
 program.name("copillm").description("Local Copilot proxy").version(pkg.version);
 program.enablePositionalOptions();
 program.option("--debug", "Enable copillm debug mode (debug endpoint plus verbose daemon diagnostics)");
+program.option(
+  "--dev",
+  "Run against an isolated dev home (COPILLM_HOME=~/.copillm-dev, port 4142) so the dev daemon never conflicts with a production copillm"
+);
 program.option("--no-update-notifier", "Skip the npm registry update check for this run");
+
+// Apply the `--dev` flag as soon as global options are parsed and before any
+// subcommand action resolves COPILLM_HOME. Idempotent with the env-based call
+// above.
+program.hook("preAction", () => {
+  applyDevModeEnv(Boolean(program.opts<{ dev?: boolean }>().dev));
+});
 
 authCmd.register(program);
 daemonCmd.register(program);

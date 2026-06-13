@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import type { Command } from "commander";
 import { inspectStoredCredential, type CredentialBackend } from "../../auth/credentials.js";
 import { loadConfig } from "../../config/config.js";
+import { getCopillmHome } from "../../config/home.js";
 import { clearClaudeGatewayCache } from "../../integrations/claude/cache.js";
 import { resolveStartContext, type PrecomputedStartContext } from "../../integrations/codex/init.js";
 import { inspectLock, releaseLock } from "../../server/lock.js";
@@ -12,11 +13,12 @@ import { probeHealth, readLiveLock, waitForDaemonReady, warnIfDebugRequestedButI
 import { runDaemon } from "../daemon/runDaemon.js";
 import { daemonSpawnEnv } from "../daemon/spawnEnv.js";
 import { buildClaudeExportCommand } from "../integrations/claudeExport.js";
-import { formatStartBanner, formatStopHumanLine } from "../integrations/banner.js";
+import { formatStartBanner, formatStopHumanLine, displayHomePath } from "../integrations/banner.js";
 import { refreshCodexHome } from "../integrations/refreshCodex.js";
 import { refreshPiHome } from "../integrations/refreshPi.js";
 import { writeAuthStatusLine } from "../shared/backends.js";
 import { currentDebugLogPath, enableRuntimeDebug, getRootLogger, resolveCopillmDebug } from "../shared/debug.js";
+import { isDevModeActive } from "../shared/devMode.js";
 import { writeCommandOutput, writeHealthOutput } from "../shared/output.js";
 import { buildSelfSpawnCommand } from "../daemon/selfSpawn.js";
 
@@ -33,6 +35,9 @@ export function register(program: Command): void {
     .action(async (opts: { detach?: boolean; debug?: boolean; codex?: boolean; codexModel?: string; pi?: boolean; json?: boolean }) => {
       const debug = resolveCopillmDebug(opts.debug);
       enableRuntimeDebug(debug);
+      if (isDevModeActive()) {
+        process.stderr.write(`dev mode: isolated COPILLM_HOME ${displayHomePath(getCopillmHome())}\n`);
+      }
       if (opts.detach) {
         // Fail fast on missing credentials rather than letting the detached
         // child die silently and surface as a generic "start timed out" error.
@@ -293,6 +298,8 @@ export function register(program: Command): void {
       const status = {
         running: lockState.state === "running",
         stale: lockState.state === "stale",
+        copillm_home: getCopillmHome(),
+        dev_mode: isDevModeActive(),
         pid: lockState.state === "running" ? lockState.lock.pid : null,
         port: lockState.state === "running" ? lockState.lock.port : null,
         started_at_iso: lockState.state === "running" ? lockState.lock.started_at_iso : null,
@@ -325,6 +332,8 @@ export function register(program: Command): void {
         process.stdout.write(JSON.stringify(status, null, 2) + "\n");
         return;
       }
+
+      process.stdout.write(`home: ${displayHomePath(status.copillm_home)}${status.dev_mode ? " (dev)" : ""}\n`);
 
       if (lockState.state === "running") {
         process.stdout.write(`running (pid ${lockState.lock.pid}, port ${lockState.lock.port})\n`);
