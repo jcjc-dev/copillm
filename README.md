@@ -75,7 +75,7 @@ Full documentation is published at **[jcjc-dev.github.io/copillm](https://jcjc-d
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Please read the [development guide](https://jcjc-dev.github.io/copillm/development/) before opening a pull request.
+Bug reports and pull requests are welcome. Develop against an isolated dev daemon (`npm run dev:start`) so you don't disturb a running copillm, and run `npm run lint && npm test && npm run test:e2e:pr` before opening a pull request. See the [development guide](https://jcjc-dev.github.io/copillm/development/) for the full workflow.
 
 ## Disclaimer
 
