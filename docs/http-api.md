@@ -6,7 +6,7 @@ nav_order: 7
 
 # HTTP API reference
 
-The daemon binds to `http://127.0.0.1:4141` by default. All endpoints accept the `Authorization: Bearer copillm-local` header (any value works — the daemon is local-only).
+The daemon binds to `http://127.0.0.1:4141` by default and accepts loopback connections only. By default any `Authorization` value works (e.g. `Authorization: Bearer copillm-local`) — the daemon is local-only. If you set `requireCallerSecret: true` in `~/.copillm/config.yaml`, the daemon generates a random secret at startup (printed as `Caller secret: …` and baked into the env blocks copillm emits), and every route except `/healthz` and `/livez` then requires `Authorization: Bearer <that-secret>`.
 
 ## Discovery
 

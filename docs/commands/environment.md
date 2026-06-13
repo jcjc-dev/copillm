@@ -2,7 +2,7 @@
 title: Environment variables
 layout: default
 parent: Commands
-nav_order: 7
+nav_order: 9
 ---
 
 # Environment variables
@@ -12,7 +12,14 @@ nav_order: 7
 | `COPILLM_PORT` | Override the daemon HTTP port. Default `4141`. |
 | `COPILLM_LOG_LEVEL` | Override copillm's log level. `copillm --debug ...` sets this to `debug` for the daemon it starts. |
 | `COPILLM_LOG_FILE` | Write daemon logs to a file. In detached debug mode the default is `~/.copillm/debug.log`; set this to choose another path. |
-| `COPILLM_CODEX_VERSION` | Pin a specific Codex CLI version used by `copillm codex`. |
+| `COPILLM_HOME` | Override copillm's home directory (default `~/.copillm`), where config, the credential-file fallback, the generated Codex config, and caches live. |
 | `COPILLM_CLAUDE_VERSION` | Pin a specific Claude Code version used by `copillm claude`. |
+| `COPILLM_CODEX_VERSION` | Pin a specific Codex CLI version used by `copillm codex`. |
+| `COPILLM_COPILOT_VERSION` | Pin a specific GitHub Copilot CLI version used by `copillm copilot`. |
+| `COPILLM_PI_VERSION` | Pin a specific pi version used by `copillm pi`. |
+| `COPILLM_PROFILE` | Default `agent.toml` profile to use when `--profile` / `--copillm-profile` is not passed. |
+| `COPILLM_YOLO` | Tri-state default for `--yolo`: `1`/`true`/`yes`/`on` enables, `0`/`false`/`no`/`off` disables (overrides `agent.toml`), unset defers to config. See [MCP & `agent.toml`](../../mcp/). |
+| `COPILLM_USE_SYSTEM_AGENT` | Set to `1`/`true`/`yes` to let the agent launchers fall back to a matching binary on `PATH`. Off by default, so copillm runs the version it manages. |
+| `COPILLM_UPDATE_CHECK` | Override the startup npm update check: `0`/`false`/`no`/`off` disables it, `1`/`true`/`yes`/`on` forces it on. Also disabled by `--no-update-notifier` or the standard `NO_UPDATE_NOTIFIER` env var. |
 | `CODEX_HOME` | Override the directory where Codex looks for its configuration file. When unset, copillm writes `~/.copillm/codex/config.toml`. |
 | `ANTHROPIC_BASE_URL` | Set automatically by `copillm claude`. You normally do not set this yourself. |

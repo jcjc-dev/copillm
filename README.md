@@ -55,7 +55,7 @@ Full documentation is published at **[jcjc-dev.github.io/copillm](https://jcjc-d
 | Topic | Description |
 | --- | --- |
 | [Getting started](https://jcjc-dev.github.io/copillm/getting-started/) | Installation, authentication, and first run |
-| [CLI reference](https://jcjc-dev.github.io/copillm/cli-reference/) | Commands and flags |
+| [CLI reference](https://jcjc-dev.github.io/copillm/commands/) | Commands and flags |
 | [Using with Claude Code](https://jcjc-dev.github.io/copillm/claude-code/) | Environment wiring, gateway discovery, the `[1m]` 1M-context alias |
 | [Using with Codex CLI](https://jcjc-dev.github.io/copillm/codex/) | Environment wiring and `config.toml` generation |
 | [HTTP API reference](https://jcjc-dev.github.io/copillm/http-api/) | Endpoints and translation behaviour |
