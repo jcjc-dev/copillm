@@ -51,6 +51,8 @@ Report whether the daemon is running, along with an `auth: { stored, backend }` 
 copillm status [--json]
 ```
 
+When the daemon is running, the output includes an `uptime` line showing how long it has been up, broken down into days, hours, minutes, and seconds (e.g. `uptime: 2d 3h 15m 9s (184509s)`). The `--json` payload carries both the raw `uptime_seconds` and the human-readable `uptime_human` string.
+
 ## `copillm health`
 
 Probe the daemon's `/health` endpoint and report the result. Useful in scripts that need to confirm the daemon is reachable before issuing requests.

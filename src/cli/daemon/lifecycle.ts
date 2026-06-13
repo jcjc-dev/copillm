@@ -65,3 +65,28 @@ export function computeUptimeSeconds(startedAtIso: string): null | number {
   return Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
 }
 
+/**
+ * Render an uptime duration (in seconds) as a compact human-readable string
+ * broken down into days, hours, minutes, and seconds — e.g. `2d 3h 15m 9s`.
+ *
+ * Leading zero-value units are dropped so short uptimes stay terse
+ * (`45s`, `5m 2s`). Sub-minute and zero durations fall back to a seconds
+ * component so the result is never empty (`0s`). Negative or non-finite
+ * inputs clamp to `0s`.
+ */
+export function formatUptime(totalSeconds: number): string {
+  const seconds = Number.isFinite(totalSeconds) ? Math.max(0, Math.floor(totalSeconds)) : 0;
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor((seconds % 86_400) / 3_600);
+  const minutes = Math.floor((seconds % 3_600) / 60);
+  const secs = seconds % 60;
+
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0) parts.push(`${minutes}m`);
+  if (secs > 0 || parts.length === 0) parts.push(`${secs}s`);
+
+  return parts.join(" ");
+}
+
