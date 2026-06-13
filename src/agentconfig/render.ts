@@ -4,7 +4,7 @@ import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { AgentConfigError, type LoadResult } from "./load.js";
 import type { McpServerEntry, ResolvedProfile, YoloConfig } from "./schema.js";
-import { getCopillmHome } from "../config/home.js";
+import { getCopillmHome, piAgentDir } from "../config/home.js";
 import {
   HASH_COMMENT,
   HTML_COMMENT,
@@ -376,8 +376,8 @@ export function renderPi(input: RenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
 
-  const piHome = path.join(process.env.HOME ?? "", ".pi");
-  const extensionDir = path.join(piHome, "agent", "extensions", PI_EXTENSION_DIRNAME);
+  const piAgent = piAgentDir();
+  const extensionDir = path.join(piAgent, "extensions", PI_EXTENSION_DIRNAME);
 
   // 1. servers.json — the resolved server list the extension reads at startup.
   const serversJson = renderPiServersJson(input.resolved.mcpServers);
@@ -398,7 +398,7 @@ export function renderPi(input: RenderInput): RenderResult {
 
   // 3. instructions prompt registered by the extension on session_start.
   if (input.resolved.instructions) {
-    const promptPath = path.join(piHome, "agent", "prompts", "copillm-profile.md");
+    const promptPath = path.join(piAgent, "prompts", "copillm-profile.md");
     writes.push({
       path: promptPath,
       content: `${input.resolved.instructions.body.trim()}\n`,
@@ -460,7 +460,10 @@ export default function activate(pi: PiApi): void {
     return "copillm-managed MCP servers:\\n" + names.map((n) => "  - " + n).join("\\n");
   });
 
-  const promptPath = path.join(process.env.HOME ?? "", ".pi", "agent", "prompts", "copillm-profile.md");
+  // Resolve the prompt relative to this extension's own directory. copillm
+  // owns the pi agent dir (via PI_CODING_AGENT_DIR), and the extension lives at
+  // <agentDir>/extensions/<name>/, so the prompt is two levels up under prompts/.
+  const promptPath = path.join(__dirname, "..", "..", "prompts", "copillm-profile.md");
   if (fs.existsSync(promptPath) && typeof pi.on === "function") {
     pi.on("session_start", () => {
       try {

@@ -30,7 +30,7 @@ export function register(program: Command): void {
     .option("--debug", "Enable debug endpoints (e.g. /_debug)")
     .option("--no-codex", "Skip generating ~/.copillm/codex/ for Codex CLI")
     .option("--codex-model <id>", "Default Codex model slug")
-    .option("--no-pi", "Skip generating ~/.pi/agent/models.json for pi coding agent")
+    .option("--no-pi", "Skip generating the copillm-owned pi models.json for pi coding agent")
     .option("--json", "JSON output")
     .action(async (opts: { detach?: boolean; debug?: boolean; codex?: boolean; codexModel?: string; pi?: boolean; json?: boolean }) => {
       const debug = resolveCopillmDebug(opts.debug);

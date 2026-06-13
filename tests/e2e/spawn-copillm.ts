@@ -31,8 +31,9 @@ export async function startCopillmAgainstMock(options: StartCopillmOptions): Pro
   args.push("--no-codex");
   if (options.skipPi) args.push("--no-pi");
 
-  // Isolate HOME so the daemon's pi-init writes ~/.pi/agent/models.json into a
-  // throwaway directory rather than clobbering the developer's real home.
+  // Isolate HOME so nothing the daemon spawns can touch the developer's real
+  // home. copillm now writes pi's models.json under COPILLM_HOME (via the
+  // PI_CODING_AGENT_DIR override), not ~/.pi, but we keep HOME isolated anyway.
   const fakeHome = path.join(options.copillmHome, "fake-home");
   fs.mkdirSync(fakeHome, { recursive: true });
 

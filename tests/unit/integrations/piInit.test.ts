@@ -119,6 +119,7 @@ beforeEach(() => {
   tmpCopillmHome = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-pi-init-cph-"));
   saveEnv("HOME");
   saveEnv("COPILLM_HOME");
+  saveEnv("PI_CODING_AGENT_DIR");
   saveEnv("USERPROFILE");
   saveEnv("HOMEDRIVE");
   saveEnv("HOMEPATH");
@@ -129,6 +130,8 @@ beforeEach(() => {
   // regardless of which platform vitest runs on.
   process.env.HOME = tmpHome;
   process.env.COPILLM_HOME = tmpCopillmHome;
+  // Default path resolution (no explicit override) lands under COPILLM_HOME.
+  delete process.env.PI_CODING_AGENT_DIR;
   process.env.USERPROFILE = tmpHome;
   const parsed = path.parse(tmpHome);
   process.env.HOMEDRIVE = parsed.root.replace(/[\\/]+$/, "");
@@ -138,6 +141,7 @@ beforeEach(() => {
 afterEach(() => {
   restoreEnv("HOME");
   restoreEnv("COPILLM_HOME");
+  restoreEnv("PI_CODING_AGENT_DIR");
   restoreEnv("USERPROFILE");
   restoreEnv("HOMEDRIVE");
   restoreEnv("HOMEPATH");
@@ -166,10 +170,12 @@ describe("generatePiHome", () => {
     expect(result.mirrorPath).toBe(path.join(outDir, "models.json"));
     expect(fs.existsSync(result.mirrorPath)).toBe(true);
 
-    // Real pi config written under $HOME/.pi/agent/models.json.
+    // Real pi config written under the copillm-owned pi agent dir (NOT ~/.pi).
     expect(result.configPath).toBe(piModelsJsonPath());
-    expect(result.configPath).toBe(path.join(tmpHome, ".pi", "agent", "models.json"));
+    expect(result.configPath).toBe(path.join(tmpCopillmHome, "pi", "agent", "models.json"));
     expect(fs.existsSync(result.configPath)).toBe(true);
+    // copillm must not touch the user's real ~/.pi.
+    expect(fs.existsSync(path.join(tmpHome, ".pi"))).toBe(false);
 
     const mirror = JSON.parse(fs.readFileSync(result.mirrorPath, "utf8"));
     const real = JSON.parse(fs.readFileSync(result.configPath, "utf8"));
@@ -202,6 +208,29 @@ describe("generatePiHome", () => {
         { id: "fake-gpt-responses-only", contextWindow: 400_000, maxTokens: 64_000 }
       ]
     });
+  });
+
+  it("honors a user-set PI_CODING_AGENT_DIR (explicit override wins over the copillm default)", async () => {
+    const customAgentDir = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-pi-custom-"));
+    process.env.PI_CODING_AGENT_DIR = customAgentDir;
+    try {
+      const { generatePiHome, defaultOutputDir, piModelsJsonPath } = await import(
+        "../../../src/integrations/pi/init.js"
+      );
+      const result = await generatePiHome({
+        outDir: defaultOutputDir(tmpCopillmHome),
+        port: 4242,
+        providerId: "copillm"
+      });
+      const expected = path.join(path.resolve(customAgentDir), "models.json");
+      expect(piModelsJsonPath()).toBe(expected);
+      expect(result.configPath).toBe(expected);
+      expect(fs.existsSync(result.configPath)).toBe(true);
+      // Even with an explicit override, copillm must not touch the real ~/.pi.
+      expect(fs.existsSync(path.join(tmpHome, ".pi"))).toBe(false);
+    } finally {
+      fs.rmSync(customAgentDir, { recursive: true, force: true });
+    }
   });
 
   it("backs up a pre-existing models.json when the new content differs", async () => {

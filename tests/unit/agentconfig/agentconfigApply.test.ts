@@ -16,6 +16,8 @@ beforeEach(() => {
   savedCopillmHome = process.env.COPILLM_HOME;
   process.env.HOME = tmpHome;
   process.env.COPILLM_HOME = tmpHome;
+  // pi config resolves under COPILLM_HOME unless explicitly overridden.
+  delete process.env.PI_CODING_AGENT_DIR;
 });
 
 afterEach(() => {
@@ -171,7 +173,7 @@ args = ["hi"]
 [profiles.default]
 `);
     applyAgentConfig({ agent: "pi", cwd: tmpCwd });
-    const extDir = path.join(tmpHome, ".pi", "agent", "extensions", "copillm-mcp");
+    const extDir = path.join(tmpHome, "pi", "agent", "extensions", "copillm-mcp");
     expect(fs.existsSync(path.join(extDir, "index.ts"))).toBe(true);
     const servers = JSON.parse(fs.readFileSync(path.join(extDir, "servers.json"), "utf8"));
     expect(servers.servers.echo.command).toBe("echo");

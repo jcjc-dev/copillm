@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import path from "node:path";
 import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle } from "../../../src/cli/agentEnv.js";
 
 describe("buildClaudeEnvBundle", () => {
@@ -50,16 +51,23 @@ describe("buildCodexEnvBundle", () => {
 });
 
 describe("buildPiEnvBundle", () => {
-  it("returns an empty env bundle with explanatory trailing notes", () => {
-    // pi has no env var override for its config dir; the bundle's role is
-    // purely documentary. Anyone reading this test must update both the
-    // implementation and these expectations together.
+  const saved = process.env.PI_CODING_AGENT_DIR;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = saved;
+  });
+
+  it("exports PI_CODING_AGENT_DIR pointing at the copillm-owned pi agent dir", () => {
+    // copillm owns pi's config dir via PI_CODING_AGENT_DIR (pi added this
+    // override; copillm no longer writes the user's real ~/.pi). Anyone reading
+    // this test must update both the implementation and these expectations.
+    process.env.PI_CODING_AGENT_DIR = path.join(path.sep, "tmp", "pi-agent");
     const bundle = buildPiEnvBundle("/tmp/pi");
-    expect(bundle.env).toEqual({});
+    expect(bundle.env).toEqual({ PI_CODING_AGENT_DIR: path.resolve(path.join(path.sep, "tmp", "pi-agent")) });
     expect(bundle.inlineComments).toEqual({});
     expect(bundle.trailingNotes.length).toBeGreaterThan(0);
-    // The notes must reference both pi's hardcoded path and the mirror dir.
-    expect(bundle.trailingNotes.some((n) => n.includes("~/.pi/agent/models.json"))).toBe(true);
+    // The notes must reference the env var copillm sets and the mirror dir.
+    expect(bundle.trailingNotes.some((n) => n.includes("PI_CODING_AGENT_DIR"))).toBe(true);
     expect(bundle.trailingNotes.some((n) => n.includes("/tmp/pi/models.json"))).toBe(true);
   });
 });

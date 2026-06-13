@@ -1,19 +1,21 @@
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { type CopilotModel } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
+import { piAgentDir } from "../../config/home.js";
 import { resolveStartContext, type PrecomputedStartContext } from "../codex/init.js";
 
 /**
- * pi (`@earendil-works/pi-coding-agent`) reads its config from a hardcoded
- * `~/<configDir>/agent/models.json`, where `<configDir>` comes from pi's own
- * package.json (`piConfig.configDir`, default ".pi"). There is no environment
- * variable override for pi's config directory.
+ * pi (`@earendil-works/pi-coding-agent`) reads its config from
+ * `<agentDir>/models.json`. pi resolves `<agentDir>` from the
+ * `PI_CODING_AGENT_DIR` env var when set, falling back to `~/.pi/agent`.
  *
- * Consequence: copillm cannot redirect pi to a copillm-owned home like it does
- * for codex (`CODEX_HOME`). Instead, we write directly to `~/.pi/agent/models.json`
- * and back up any pre-existing file the first time we touch it.
+ * copillm owns that path via `piAgentDir()` (see `src/config/home.ts`): it
+ * defaults to `<COPILLM_HOME>/pi/agent` and copillm exports `PI_CODING_AGENT_DIR`
+ * to it when launching pi (see `buildPiEnvBundle`). This keeps copillm out of
+ * the user's real `~/.pi`, and makes dev/prod isolation automatic (the dev home
+ * relocates it). We still back up any pre-existing file the first time we touch
+ * a path, in case the user pointed `PI_CODING_AGENT_DIR` at an existing dir.
  */
 
 export interface PiInitOptions {
@@ -39,7 +41,7 @@ export interface PiInitResult {
   outDir: string;
   /** Mirror of models.json kept under copillm's home for inspection. */
   mirrorPath: string;
-  /** The actual file pi reads at launch (`~/.pi/agent/models.json`). */
+  /** The actual file pi reads at launch (`<PI_CODING_AGENT_DIR>/models.json`). */
   configPath: string;
   /** If a pre-existing models.json was backed up, the backup path. */
   backupPath: string | null;
@@ -158,9 +160,9 @@ export function defaultOutputDir(home: string): string {
   return path.join(home, "pi");
 }
 
-/** Absolute path to `~/.pi/agent/models.json`. Honors $HOME for tests. */
+/** Absolute path to pi's `models.json`, under the copillm-owned pi agent dir. */
 export function piModelsJsonPath(): string {
-  return path.join(os.homedir(), ".pi", "agent", "models.json");
+  return path.join(piAgentDir(), "models.json");
 }
 
 /**

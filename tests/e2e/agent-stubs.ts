@@ -28,7 +28,7 @@ export function createAgentStub(opts: { dir: string; agent: AgentName; capturePa
     opts.agent === "codex"
       ? ["CODEX_HOME"]
       : opts.agent === "pi"
-      ? ["HOME"]
+      ? ["HOME", "PI_CODING_AGENT_DIR"]
       : [
           "ANTHROPIC_BASE_URL",
           "ANTHROPIC_AUTH_TOKEN",
@@ -82,7 +82,7 @@ export function buildAgentStubTarball(opts: {
     opts.agent === "codex"
       ? ["CODEX_HOME"]
       : opts.agent === "pi"
-      ? ["HOME"]
+      ? ["HOME", "PI_CODING_AGENT_DIR"]
       : [
           "ANTHROPIC_BASE_URL",
           "ANTHROPIC_AUTH_TOKEN",
