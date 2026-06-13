@@ -7,7 +7,7 @@ import { resolveStartContext, type PrecomputedStartContext } from "../../integra
 import { inspectLock, releaseLock } from "../../server/lock.js";
 import { buildCodexEnvBundle } from "../agentEnv.js";
 import { ensureAuthenticatedInteractive } from "../auth/ensure.js";
-import { computeUptimeSeconds, stopByPid } from "../daemon/lifecycle.js";
+import { computeUptimeSeconds, formatUptime, stopByPid } from "../daemon/lifecycle.js";
 import { probeHealth, readLiveLock, waitForDaemonReady, warnIfDebugRequestedButInactive } from "../daemon/probes.js";
 import { runDaemon } from "../daemon/runDaemon.js";
 import { daemonSpawnEnv } from "../daemon/spawnEnv.js";
@@ -297,6 +297,7 @@ export function register(program: Command): void {
         port: lockState.state === "running" ? lockState.lock.port : null,
         started_at_iso: lockState.state === "running" ? lockState.lock.started_at_iso : null,
         uptime_seconds: uptimeSeconds,
+        uptime_human: uptimeSeconds === null ? null : formatUptime(uptimeSeconds),
         url: lockState.state === "running" ? `http://127.0.0.1:${lockState.lock.port}` : null,
         require_caller_secret: config.requireCallerSecret,
         account_type: config.accountType,
@@ -342,7 +343,7 @@ export function register(program: Command): void {
           process.stdout.write(`bearer_ttl_seconds: ${status.bearer_ttl_seconds}\n`);
         }
         if (status.uptime_seconds !== null) {
-          process.stdout.write(`uptime_seconds: ${status.uptime_seconds}\n`);
+          process.stdout.write(`uptime: ${formatUptime(status.uptime_seconds)} (${status.uptime_seconds}s)\n`);
         }
         writeAuthStatusLine(authInfo);
         process.stdout.write(`checked_at: ${status.checked_at_iso}\n`);
