@@ -1,10 +1,21 @@
 import type { Command } from "commander";
+import type { AccountType } from "../../types/index.js";
 import { inspectStoredCredential, loadStoredCredentialForStatus } from "../../auth/credentials.js";
+import { readAccountsIndex } from "../../auth/accounts.js";
 import { inspectGithubIdentity, type GithubIdentitySummary } from "../../auth/githubIdentity.js";
 import { ensureAuthenticatedInteractive } from "../auth/ensure.js";
-import { runAuthLogin, runAuthLogout } from "../auth/runAuth.js";
+import { runAuthLogin, runAuthLogout, runAuthStatusList, runAuthSwitch } from "../auth/runAuth.js";
 import { formatHumanAuthStatusLine } from "../shared/backends.js";
 import { emitDeprecation } from "../shared/deprecation.js";
+
+const ACCOUNT_TYPES: readonly AccountType[] = ["individual", "business", "enterprise"];
+
+function parseAccountType(value: string): AccountType {
+  if ((ACCOUNT_TYPES as readonly string[]).includes(value)) {
+    return value as AccountType;
+  }
+  throw new Error(`Invalid --account-type "${value}". Expected one of: ${ACCOUNT_TYPES.join(", ")}.`);
+}
 
 // Re-export for callers (e.g. start command) that need the interactive prompt.
 export { ensureAuthenticatedInteractive };
@@ -34,11 +45,13 @@ export function register(program: Command): void {
     .command("login")
     .description("Authenticate with GitHub")
     .option("--json", "JSON output")
+    .option("--as <account>", "Name this account (enables multiple accounts)")
+    .option("--account-type <type>", "Account plan type: individual | business | enterprise", parseAccountType)
     // Undocumented test seam: force the session-only backend regardless of
     // whether the OS keychain is available. Equivalent to setting
     // COPILLM_FORCE_SESSION_BACKEND=1 for the duration of this command.
     .option("--force-session", "(test-only) force the session-only backend", false)
-    .action(async (opts: { json?: boolean; forceSession?: boolean }) => {
+    .action(async (opts: { json?: boolean; as?: string; accountType?: AccountType; forceSession?: boolean }) => {
       await runAuthLogin(opts, { forceSession: Boolean(opts.forceSession) });
     });
 
@@ -46,8 +59,19 @@ export function register(program: Command): void {
     .command("logout")
     .description("Clear credentials and stop running daemon")
     .option("--json", "JSON output")
-    .action(async (opts: { json?: boolean }) => {
+    .option("--account <account>", "Log out a specific account (default: the default account)")
+    .option("--all", "Log out of every account")
+    .action(async (opts: { json?: boolean; account?: string; all?: boolean }) => {
       await runAuthLogout(opts);
+    });
+
+  auth
+    .command("switch")
+    .argument("<account>", "Account id to make the default")
+    .description("Set the default account")
+    .option("--json", "JSON output")
+    .action(async (account: string, opts: { json?: boolean }) => {
+      await runAuthSwitch(opts, account);
     });
 
   auth
@@ -59,6 +83,13 @@ export function register(program: Command): void {
       // commander's --no-user toggles opts.user to false; when the flag is
       // omitted opts.user is undefined and we treat that as "fetch by default".
       const wantUserLookup = opts.user !== false;
+
+      // Multi-account installs (an accounts index exists) get the per-account
+      // listing. Single-account installs keep the exact original output below.
+      if (readAccountsIndex()) {
+        const { anyStored } = await runAuthStatusList(opts);
+        process.exit(anyStored ? 0 : 2);
+      }
 
       // Two paths to minimize keychain probes:
       //   - With user lookup (default): `loadStoredCredentialForStatus()`
