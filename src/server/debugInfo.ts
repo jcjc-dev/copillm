@@ -1,4 +1,5 @@
 import { setTimeout as defaultSleep } from "node:timers/promises";
+import { createHash } from "node:crypto";
 
 import { githubUserUrl } from "../config/upstream.js";
 import { isRetryableStatus, isRetryableTransportError, retryDelayMs } from "./upstream/retryPolicy.js";
@@ -17,7 +18,16 @@ interface GithubUserSummary {
 const CACHE_TTL_MS = 5 * 60 * 1_000;
 const DEFAULT_MAX_ATTEMPTS = 3;
 
-let cached: { fetchedAt: number; summary: GithubUserSummary } | null = null;
+// Cache keyed by a hash of the GitHub token. It MUST be per-token: different
+// tokens identify different GitHub accounts, and a token-blind cache returns
+// one account's identity for another's — which silently broke multi-account
+// `auth login` (a second login appeared to be the same account and overwrote
+// the first). Hashing avoids retaining raw tokens as map keys.
+const cache = new Map<string, { fetchedAt: number; summary: GithubUserSummary }>();
+
+function cacheKey(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
 
 interface GetGithubUserOptions {
   timeoutMs?: number;
@@ -46,8 +56,10 @@ export async function getGithubUserSummary(
   options: GetGithubUserOptions = {}
 ): Promise<GithubUserSummary> {
   const now = Date.now();
-  if (cached && now - cached.fetchedAt < CACHE_TTL_MS) {
-    return cached.summary;
+  const key = cacheKey(githubToken);
+  const hit = cache.get(key);
+  if (hit && now - hit.fetchedAt < CACHE_TTL_MS) {
+    return hit.summary;
   }
 
   const fetchImpl = options.fetchImpl ?? ((input, init) => fetch(input, init));
@@ -93,7 +105,7 @@ export async function getGithubUserSummary(
         plan_name: typeof payload.plan?.name === "string" ? payload.plan.name : null
       };
 
-      cached = { fetchedAt: Date.now(), summary };
+      cache.set(key, { fetchedAt: Date.now(), summary });
       return summary;
     }
 
@@ -117,7 +129,7 @@ export async function getGithubUserSummary(
 }
 
 export function clearGithubUserCache(): void {
-  cached = null;
+  cache.clear();
 }
 
 export class GithubUserFetchError extends Error {

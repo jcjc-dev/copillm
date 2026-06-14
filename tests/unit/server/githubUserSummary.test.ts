@@ -219,3 +219,43 @@ describe("getGithubUserSummary — timeoutMs is plumbed through to AbortSignal",
     expect(observedSignal).toBeNull();
   });
 });
+
+describe("getGithubUserSummary — cache is keyed by token (multi-account)", () => {
+  // A token-aware fetch: returns a different login per `Authorization: token X`.
+  function tokenAwareFetch(map: Record<string, string>): { fetchImpl: typeof fetch; calls: number } {
+    let calls = 0;
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      calls += 1;
+      const auth = (init?.headers as Record<string, string> | undefined)?.Authorization ?? "";
+      const token = auth.replace(/^token\s+/, "");
+      const login = map[token];
+      if (!login) return statusOnly(404);
+      return userOk(login);
+    };
+    return {
+      fetchImpl,
+      get calls() {
+        return calls;
+      }
+    };
+  }
+
+  it("returns the correct user per token instead of a stale cached one", async () => {
+    const f = tokenAwareFetch({ "tok-alice": "alice", "tok-bob": "bob" });
+    const a = await getGithubUserSummary("tok-alice", { fetchImpl: f.fetchImpl, sleepImpl: async () => {} });
+    expect(a.login).toBe("alice");
+    // Second token, different account — must NOT return alice from a token-blind cache.
+    const b = await getGithubUserSummary("tok-bob", { fetchImpl: f.fetchImpl, sleepImpl: async () => {} });
+    expect(b.login).toBe("bob");
+    expect(f.calls).toBe(2);
+  });
+
+  it("still caches per token: the same token does not re-fetch within the TTL", async () => {
+    const f = tokenAwareFetch({ "tok-alice": "alice" });
+    const first = await getGithubUserSummary("tok-alice", { fetchImpl: f.fetchImpl, sleepImpl: async () => {} });
+    const second = await getGithubUserSummary("tok-alice", { fetchImpl: f.fetchImpl, sleepImpl: async () => {} });
+    expect(first.login).toBe("alice");
+    expect(second.login).toBe("alice");
+    expect(f.calls).toBe(1); // served from cache the second time
+  });
+});
