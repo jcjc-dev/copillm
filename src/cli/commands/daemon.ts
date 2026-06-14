@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import type { Command } from "commander";
 import { inspectStoredCredential, type CredentialBackend } from "../../auth/credentials.js";
 import { loadConfig } from "../../config/config.js";
@@ -9,9 +8,8 @@ import { inspectLock, releaseLock } from "../../server/lock.js";
 import { buildCodexEnvBundle } from "../agentEnv.js";
 import { ensureAuthenticatedInteractive } from "../auth/ensure.js";
 import { computeUptimeSeconds, formatUptime, stopByPid } from "../daemon/lifecycle.js";
-import { probeHealth, readLiveLock, waitForDaemonReady, warnIfDebugRequestedButInactive } from "../daemon/probes.js";
+import { probeDebugEndpoint, probeHealth, readLiveLock, warnIfDebugRequestedButInactive } from "../daemon/probes.js";
 import { runDaemon } from "../daemon/runDaemon.js";
-import { daemonSpawnEnv } from "../daemon/spawnEnv.js";
 import { buildClaudeExportCommand } from "../integrations/claudeExport.js";
 import { formatStartBanner, formatStopHumanLine, displayHomePath } from "../integrations/banner.js";
 import { refreshCodexHome } from "../integrations/refreshCodex.js";
@@ -20,7 +18,8 @@ import { writeAuthStatusLine } from "../shared/backends.js";
 import { currentDebugLogPath, enableRuntimeDebug, getRootLogger, resolveCopillmDebug } from "../shared/debug.js";
 import { isDevModeActive } from "../shared/devMode.js";
 import { writeCommandOutput, writeHealthOutput } from "../shared/output.js";
-import { buildSelfSpawnCommand } from "../daemon/selfSpawn.js";
+import { spawnDetachedDaemon } from "../daemon/spawnDetached.js";
+import { resolveRestartDecision, type DaemonLockState } from "../daemon/restart.js";
 
 export function register(program: Command): void {
   program
@@ -85,58 +84,8 @@ export function register(program: Command): void {
           return;
         }
 
-        const daemonCommand = buildSelfSpawnCommand("daemon");
-        if (debug) {
-          daemonCommand.args.push("--debug");
-        }
-        const child = spawn(daemonCommand.command, daemonCommand.args, {
-          detached: true,
-          stdio: "ignore",
-          env: daemonSpawnEnv(debug)
-        });
-        child.unref();
-
-        const started = await waitForDaemonReady(child.pid ?? null, 8_000);
-        if (!started) {
-          throw new Error("Detached daemon start timed out.");
-        }
-
-        const sharedDetached = await loadSharedStartContextIfNeeded(opts);
-        const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, sharedDetached);
-        const pi = opts.pi === false ? null : await refreshPiHome(started.port, sharedDetached);
-        const claude = buildClaudeExportCommand(started.port, null);
-        const banner = formatStartBanner({
-          port: started.port,
-          pid: started.pid,
-          mode: "detached",
-          debug,
-          debugLogPath: currentDebugLogPath(debug),
-          codex,
-          pi
-        });
-
-        writeCommandOutput(opts, banner, {
-          status: "ok",
-          mode: "detached",
-          pid: started.pid,
-          port: started.port,
-          debug,
-          debug_log_path: currentDebugLogPath(debug),
-          url: `http://127.0.0.1:${started.port}`,
-          codex_home: codex?.outDir ?? null,
-          codex_export_command: codex?.exportCommand ?? null,
-          codex_env: codex ? buildCodexEnvBundle(codex.outDir).env : null,
-          codex_default_model: codex?.defaultModel ?? null,
-          codex_model_count: codex?.modelCount ?? null,
-          pi_home: pi?.outDir ?? null,
-          pi_config_path: pi?.configPath ?? null,
-          pi_mirror_path: pi?.mirrorPath ?? null,
-          pi_backup_path: pi?.backupPath ?? null,
-          pi_model_count: pi?.modelCount ?? null,
-          claude_export_command: claude.command,
-          claude_env: claude.bundle.env,
-          claude_defaults: claude.defaults
-        });
+        const started = await spawnDetachedDaemon({ debug });
+        await emitDetachedStartOutput(opts, started, debug, "detached");
         return;
       }
 
@@ -216,6 +165,51 @@ export function register(program: Command): void {
         claude_export_command: claude.command,
         claude_env: claude.bundle.env,
         claude_defaults: claude.defaults
+      });
+    });
+
+  program
+    .command("restart")
+    .description("Restart the daemon, preserving its current port and debug mode")
+    .option("--debug", "Force debug endpoints on for the restarted daemon")
+    .option("--no-codex", "Skip generating ~/.copillm/codex/ for Codex CLI")
+    .option("--codex-model <id>", "Default Codex model slug")
+    .option("--no-pi", "Skip generating the copillm-owned pi models.json for pi coding agent")
+    .option("--json", "JSON output")
+    .action(async (opts: { debug?: boolean; codex?: boolean; codexModel?: string; pi?: boolean; json?: boolean }) => {
+      const forceDebug = resolveCopillmDebug(opts.debug);
+      if (isDevModeActive()) {
+        process.stderr.write(`dev mode: isolated COPILLM_HOME ${displayHomePath(getCopillmHome())}\n`);
+      }
+
+      // Restart always brings the daemon back up detached, so fail fast on
+      // missing credentials rather than letting the detached child die silently.
+      const authState = await inspectStoredCredential();
+      if (!authState.stored) {
+        throw new Error("Not authenticated. Run `copillm auth login` first.");
+      }
+
+      // Detect the running daemon's debug mode *before* stopping it — `/_debug`
+      // is only reachable while the daemon is up.
+      const lockSnapshot = toDaemonLockState(inspectLock());
+      const detectedDebug =
+        lockSnapshot.state === "running" ? await probeDebugEndpoint(lockSnapshot.port) : false;
+      const decision = resolveRestartDecision({ lock: lockSnapshot, detectedDebug, forceDebug });
+      enableRuntimeDebug(decision.debug);
+
+      if (decision.action === "restart" && decision.previousPid !== null) {
+        await stopByPid(decision.previousPid);
+      } else if (decision.clearStaleLock) {
+        releaseLock();
+      }
+      // Mirror `stop`: clearing the Claude gateway cache on the way down keeps
+      // Claude Code from pinning a stale model picker across the restart.
+      const cache = clearClaudeGatewayCache();
+
+      const started = await spawnDetachedDaemon({ debug: decision.debug, forcePort: decision.forcePort });
+      await emitDetachedStartOutput(opts, started, decision.debug, "restarted", {
+        previousPid: decision.previousPid,
+        claudeCache: cache
       });
     });
 
@@ -403,6 +397,76 @@ export function register(program: Command): void {
         process.exitCode = 1;
       }
     });
+}
+
+/**
+ * Emit the human banner + JSON payload for a daemon that was just brought up in
+ * the background. Shared by `copillm start --detach` (`mode: "detached"`) and
+ * `copillm restart` (`mode: "restarted"`), so both surface the same codex/pi/
+ * claude wiring. `extra` carries restart-only fields (`previous_pid`, the
+ * Claude cache-clear result).
+ */
+async function emitDetachedStartOutput(
+  opts: { json?: boolean; codex?: boolean; codexModel?: string; pi?: boolean },
+  started: { pid: number; port: number },
+  debug: boolean,
+  mode: "detached" | "restarted",
+  extra?: { previousPid?: number | null; claudeCache?: { cleared: boolean; reason: null | string } }
+): Promise<void> {
+  const shared = await loadSharedStartContextIfNeeded(opts);
+  const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, shared);
+  const pi = opts.pi === false ? null : await refreshPiHome(started.port, shared);
+  const claude = buildClaudeExportCommand(started.port, null);
+  const banner = formatStartBanner({
+    port: started.port,
+    pid: started.pid,
+    mode,
+    debug,
+    debugLogPath: currentDebugLogPath(debug),
+    codex,
+    pi
+  });
+
+  const payload: Record<string, unknown> = {
+    status: "ok",
+    mode,
+    pid: started.pid,
+    port: started.port,
+    debug,
+    debug_log_path: currentDebugLogPath(debug),
+    url: `http://127.0.0.1:${started.port}`,
+    codex_home: codex?.outDir ?? null,
+    codex_export_command: codex?.exportCommand ?? null,
+    codex_env: codex ? buildCodexEnvBundle(codex.outDir).env : null,
+    codex_default_model: codex?.defaultModel ?? null,
+    codex_model_count: codex?.modelCount ?? null,
+    pi_home: pi?.outDir ?? null,
+    pi_config_path: pi?.configPath ?? null,
+    pi_mirror_path: pi?.mirrorPath ?? null,
+    pi_backup_path: pi?.backupPath ?? null,
+    pi_model_count: pi?.modelCount ?? null,
+    claude_export_command: claude.command,
+    claude_env: claude.bundle.env,
+    claude_defaults: claude.defaults
+  };
+  if (extra?.previousPid !== undefined) {
+    payload.previous_pid = extra.previousPid;
+  }
+  if (extra?.claudeCache !== undefined) {
+    payload.claude_cache = extra.claudeCache;
+  }
+  writeCommandOutput(opts, banner, payload);
+}
+
+/** Narrow the lock inspection down to the shape `resolveRestartDecision` needs. */
+function toDaemonLockState(lockState: ReturnType<typeof inspectLock>): DaemonLockState {
+  if (lockState.state === "running") {
+    return { state: "running", pid: lockState.lock.pid, port: lockState.lock.port };
+  }
+  if (lockState.state === "stale") {
+    return { state: "stale" };
+  }
+  return { state: "missing" };
 }
 
 /**

@@ -29,7 +29,22 @@ Prefer the global form for consistency:
 copillm --debug start --detach
 ```
 
-If a daemon is already running without debug mode, stop it first; copillm will not restart a live daemon just to change diagnostics.
+If a daemon is already running without debug mode, `copillm start` will not change its diagnostics. Use [`copillm restart --debug`](#copillm-restart) (or `copillm stop` then `copillm --debug start`) to bring it back up with debug enabled.
+
+## `copillm restart`
+
+Restart the running daemon, bringing it back up in the background on the **same port and debug mode it is currently running on**. Handy after rotating credentials, or to recover a wedged daemon without having to remember how it was originally started.
+
+```bash
+copillm [--debug] restart [--json]
+```
+
+| Flag | Description |
+| --- | --- |
+| `--debug` | Force debug mode on for the restarted daemon, even if it was running without it. |
+| `--json` | Emit a JSON result instead of human output. |
+
+The restarted daemon keeps the port it was already serving and preserves its current debug mode automatically — pass `--debug` only when you want to turn diagnostics on. Like [`copillm stop`](#copillm-stop), a restart clears the Claude Code gateway model cache. If no daemon is running, `restart` just starts one with default settings.
 
 ## `copillm stop`
 
