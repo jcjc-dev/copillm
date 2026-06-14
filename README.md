@@ -89,6 +89,10 @@ The **default account** is what every agent and the model endpoints use unless
 told otherwise. `copillm auth status` lists each account with its plan type and
 whether a credential is stored; tokens are never printed.
 
+If the daemon is already running when you `auth switch`, copillm reminds you to
+run `copillm restart` so the new default takes effect for the next agent launch.
+(`auth logout` stops the daemon for you, so it needs no restart.)
+
 Different accounts can be entitled to different models, so each account keeps
 its own model list.
 

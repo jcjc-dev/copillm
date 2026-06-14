@@ -280,10 +280,16 @@ export async function runAuthSwitch(opts: { json?: boolean }, accountId: string)
   try {
     assertValidAccountId(accountId);
     const index = switchDefaultAccount(accountId);
-    writeCommandOutput(opts, `Default account is now "${index.defaultAccount}".`, {
+    // A running daemon snapshots the default account at startup, so a switch
+    // only affects new agent launches after the daemon is restarted. (`auth
+    // logout` doesn't need this hint — it already stops the daemon.)
+    const daemonRunning = inspectLock().state === "running";
+    const hint = daemonRunning ? " Restart the daemon for this to take effect: copillm restart." : "";
+    writeCommandOutput(opts, `Default account is now "${index.defaultAccount}".${hint}`, {
       status: "ok",
       action: "switch",
-      default_account: index.defaultAccount
+      default_account: index.defaultAccount,
+      restart_required: daemonRunning
     });
   } catch (error) {
     const message =
