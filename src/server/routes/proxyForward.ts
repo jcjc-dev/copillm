@@ -2,10 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Logger } from "pino";
 import type { AppConfig } from "../../types/index.js";
 import { resolveModelId } from "../../models/discovery.js";
-import {
-  CopilotTokenManager,
-  CopilotTokenManagerError
-} from "../../auth/copilotToken.js";
+import { CopilotTokenManagerError } from "../../auth/copilotToken.js";
 import {
   anthropicToOpenAI
 } from "../../translation/openaiAnthropic.js";
@@ -24,6 +21,7 @@ import {
   forwardResponse,
   isStreamingRequestBody
 } from "../upstream/streaming.js";
+import type { ResolvedAccount } from "../accountResolver.js";
 import {
   normaliseAliasedModelInPlace,
   readJson,
@@ -52,12 +50,12 @@ export async function handleProxyForward(input: {
   res: ServerResponse;
   route: RequestRoute;
   config: AppConfig;
-  tokenManager: CopilotTokenManager;
+  account: ResolvedAccount;
   logger: Logger;
   requestId: string;
   signal: AbortSignal;
 }): Promise<void> {
-  const { req, res, route, config, tokenManager, logger, requestId, signal } = input;
+  const { req, res, route, config, account, logger, requestId, signal } = input;
   const requestBody = await readJson(req);
   const translatedBody = translateRequestBody(route.kind, requestBody);
   const requestedModel = readRequestedModel(translatedBody);
@@ -107,8 +105,8 @@ export async function handleProxyForward(input: {
   );
   try {
     const upstream = await postToCopilot({
-      tokenManager,
-      accountType: config.accountType,
+      tokenManager: account.tokenManager,
+      accountType: account.accountType,
       body: upstreamBody,
       requestId,
       logger,

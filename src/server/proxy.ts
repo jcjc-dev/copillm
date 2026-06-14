@@ -4,6 +4,11 @@ import type { Logger } from "pino";
 import type { AppConfig } from "../types/index.js";
 import { CopilotTokenManager } from "../auth/copilotToken.js";
 import {
+  singleAccountResolver,
+  type AccountResolver,
+  type ResolvedAccount
+} from "./accountResolver.js";
+import {
   attachRequestLifecycle,
   isBenignSocketError,
   safeEnd,
@@ -18,7 +23,7 @@ import { handleHealthz, handleLivez } from "./routes/health.js";
 import { handleModels } from "./routes/models.js";
 import { handleDebug } from "./routes/debug.js";
 import { handleProxyForward } from "./routes/proxyForward.js";
-import { isLocalRequest, resolveRoute, safePathname } from "./routes/shared.js";
+import { isLocalRequest, resolveRoute, safePathname, type RequestRoute } from "./routes/shared.js";
 
 export async function startProxyServer(input: {
   port: number;
@@ -28,8 +33,33 @@ export async function startProxyServer(input: {
   callerSecret: null | string;
   debug?: boolean;
   githubToken?: string;
+  /**
+   * Multi-account resolver. When omitted, a single-account resolver wrapping
+   * `tokenManager` + `githubToken` is used, preserving the exact pre-multi-
+   * account behaviour (every request serves the default account).
+   */
+  accountResolver?: AccountResolver;
 }): Promise<{ close: () => Promise<void> }> {
   const debugEnabled = input.debug === true;
+  const resolver: AccountResolver =
+    input.accountResolver ??
+    singleAccountResolver({
+      tokenManager: input.tokenManager,
+      githubToken: input.githubToken ?? "",
+      accountType: input.config.accountType
+    });
+
+  // Resolve the account a request targets. Returns the default account for an
+  // unprefixed request; for an `/<account>` prefix, looks up the named account
+  // and answers 404 `account_not_found` when no credential is stored for it.
+  const resolveAccountForRoute = async (route: RequestRoute): Promise<ResolvedAccount | null> => {
+    if (route.accountId === null) {
+      return resolver.default;
+    }
+    const account = await resolver.resolveById(route.accountId);
+    return account;
+  };
+
   const server = createServer(async (req, res) => {
     const requestId = randomUUID();
     const startedAt = Date.now();
@@ -67,13 +97,21 @@ export async function startProxyServer(input: {
           handleLivez(res);
           return;
         case "healthz":
-          await handleHealthz(res, input.tokenManager);
+          await handleHealthz(res, resolver.default.tokenManager);
           return;
         case "models":
-        case "codex_models":
-        case "anthropic_models":
-          await handleModels(res, route.kind, input.config, input.tokenManager, input.githubToken);
+          await handleModels(res, route.kind, resolver.default);
           return;
+        case "codex_models":
+        case "anthropic_models": {
+          const account = await resolveAccountForRoute(route);
+          if (!account) {
+            safeSendJson(res, 404, { error: "account_not_found", detail: `No stored credential for account "${route.accountId}".` });
+            return;
+          }
+          await handleModels(res, route.kind, account);
+          return;
+        }
         case "debug":
           if (!debugEnabled) {
             safeSendJson(res, 404, { error: "not_found" });
@@ -82,9 +120,10 @@ export async function startProxyServer(input: {
           await handleDebug(res, {
             config: input.config,
             logger: input.logger,
-            tokenManager: input.tokenManager,
-            githubToken: input.githubToken,
-            port: input.port
+            tokenManager: resolver.default.tokenManager,
+            githubToken: resolver.default.githubToken,
+            port: input.port,
+            accounts: resolver.describe()
           });
           return;
         case "not_found":
@@ -92,18 +131,24 @@ export async function startProxyServer(input: {
           return;
         case "openai":
         case "anthropic":
-        case "codex_responses":
+        case "codex_responses": {
+          const account = await resolveAccountForRoute(route);
+          if (!account) {
+            safeSendJson(res, 404, { error: "account_not_found", detail: `No stored credential for account "${route.accountId}".` });
+            return;
+          }
           await handleProxyForward({
             req,
             res,
             route,
             config: input.config,
-            tokenManager: input.tokenManager,
+            account,
             logger: input.logger,
             requestId,
             signal: lifecycle.signal
           });
           return;
+        }
       }
     } catch (error) {
       if (error instanceof JsonRequestParseError) {

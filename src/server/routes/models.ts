@@ -1,33 +1,28 @@
 import type { ServerResponse } from "node:http";
-import type { AppConfig } from "../../types/index.js";
-import {
-  CopilotTokenManager,
-  CopilotTokenManagerError
-} from "../../auth/copilotToken.js";
+import { CopilotTokenManagerError } from "../../auth/copilotToken.js";
 import { listModels, listModelsUnion } from "../../models/discovery.js";
 import { buildCodexCatalog } from "../codexSchema.js";
 import { buildAnthropicModelsResponse } from "../anthropicModelsResponse.js";
 import { tokenErrorToHttpResponse } from "../errors.js";
 import { safeSendJson } from "../requestLifecycle.js";
+import type { ResolvedAccount } from "../accountResolver.js";
 import type { RequestRoute } from "./shared.js";
 
 export async function handleModels(
   res: ServerResponse,
   routeKind: Extract<RequestRoute["kind"], "models" | "codex_models" | "anthropic_models">,
-  config: AppConfig,
-  tokenManager: CopilotTokenManager,
-  githubToken: string | undefined
+  account: ResolvedAccount
 ): Promise<void> {
   try {
-    await tokenManager.ensureToken(false);
-    if (!githubToken) {
+    await account.tokenManager.ensureToken(false);
+    if (!account.githubToken) {
       safeSendJson(res, 503, { error: "github_token_unavailable" });
       return;
     }
     const result =
       routeKind === "codex_models" || routeKind === "anthropic_models"
-        ? await listModelsUnion(config.accountType, githubToken, 3)
-        : await listModels(config.accountType, githubToken);
+        ? await listModelsUnion(account.accountType, account.githubToken, 3, undefined, account.cacheId)
+        : await listModels(account.accountType, account.githubToken, undefined, account.cacheId);
     if (routeKind === "codex_models") {
       safeSendJson(res, 200, buildCodexCatalog(result.models));
       return;

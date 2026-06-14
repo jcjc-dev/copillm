@@ -15,6 +15,7 @@ export async function handleDebug(
     tokenManager: CopilotTokenManager;
     githubToken?: string;
     port: number;
+    accounts?: { defaultAccountId: string | null; activeAccountIds: string[] };
   }
 ): Promise<void> {
   const bearerTtlSeconds = input.tokenManager.expiresInSeconds();
@@ -61,6 +62,13 @@ export async function handleDebug(
       bearer_ttl_seconds: bearerTtlSeconds,
       bearer_present: input.tokenManager.current !== null,
       bearer_expires_at_unix: input.tokenManager.current?.expiresAtUnix ?? null
+    },
+    accounts: {
+      // Token is never included. Reports the default account id (null for a
+      // single-account install) and the named accounts that have served at
+      // least one request this daemon lifetime.
+      default: input.accounts?.defaultAccountId ?? null,
+      active: input.accounts?.activeAccountIds ?? []
     },
     user,
     user_error: userError,

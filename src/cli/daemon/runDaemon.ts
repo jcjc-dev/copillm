@@ -1,9 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { loadStoredCredential } from "../../auth/credentials.js";
+import { readAccountsIndex } from "../../auth/accounts.js";
 import { CopilotTokenManager } from "../../auth/copilotToken.js";
 import { loadConfig } from "../../config/config.js";
 import { acquireLock, LockAlreadyRunningError, releaseLock } from "../../server/lock.js";
 import { startProxyServer } from "../../server/proxy.js";
+import { DaemonAccountResolver, type ResolvedAccount } from "../../server/accountResolver.js";
 import type { LockFileData } from "../../types/index.js";
 import { installProcessSafetyNet } from "../processSafetyNet.js";
 import { getRootLogger } from "../shared/debug.js";
@@ -39,6 +41,23 @@ export async function runDaemon(options?: { debug?: boolean }): Promise<
   const tokenManager = new CopilotTokenManager(creds.token);
   await tokenManager.ensureToken(false);
 
+  // Build the default account's resolved identity. With no accounts index this
+  // is the legacy single account (accountId null, legacy model cache). With an
+  // index, it reflects the configured default account's id, plan type, and
+  // storage scheme — so model discovery and the cache key stay correct.
+  const accountsIndex = readAccountsIndex();
+  const defaultRecord = accountsIndex
+    ? accountsIndex.accounts.find((account) => account.id === accountsIndex.defaultAccount) ?? null
+    : null;
+  const defaultAccount: ResolvedAccount = {
+    accountId: defaultRecord?.id ?? null,
+    githubToken: creds.token,
+    tokenManager,
+    accountType: defaultRecord?.accountType ?? config.accountType,
+    cacheId: defaultRecord && defaultRecord.storage === "namespaced" ? defaultRecord.id : undefined
+  };
+  const accountResolver = new DaemonAccountResolver({ default: defaultAccount });
+
   const callerSecret = config.requireCallerSecret ? randomUUID() : null;
   if (callerSecret) {
     process.stdout.write(`Caller secret: ${callerSecret}\n`);
@@ -64,6 +83,7 @@ export async function runDaemon(options?: { debug?: boolean }): Promise<
         port,
         config,
         tokenManager,
+        accountResolver,
         callerSecret,
         logger,
         debug: Boolean(options?.debug),
@@ -81,7 +101,7 @@ export async function runDaemon(options?: { debug?: boolean }): Promise<
   }
 
   if (!server || selectedPort === null) {
-    tokenManager.clear();
+    accountResolver.clearAll();
     throw new Error(`No available port in configured range (${ports[0]}-${ports[ports.length - 1]}).`);
   }
 
@@ -98,7 +118,7 @@ export async function runDaemon(options?: { debug?: boolean }): Promise<
     } catch (error) {
       logger.warn({ err: error }, "graceful shutdown timed out");
     } finally {
-      tokenManager.clear();
+      accountResolver.clearAll();
       releaseLock();
       process.exit(0);
     }

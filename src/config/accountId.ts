@@ -37,3 +37,12 @@ export function assertValidAccountId(accountId: string): void {
     );
   }
 }
+
+/**
+ * Non-throwing variant for hot paths (e.g. parsing an optional account prefix
+ * out of a request URL) where an invalid id should just mean "not an account
+ * prefix" rather than an error.
+ */
+export function isValidAccountId(accountId: string): boolean {
+  return accountId.length > 0 && accountId.length <= MAX_ACCOUNT_ID_LENGTH && ACCOUNT_ID_PATTERN.test(accountId);
+}
