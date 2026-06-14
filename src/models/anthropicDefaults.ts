@@ -74,10 +74,12 @@ export function buildClaudeExportCommand(input: {
   callerSecret: null | string;
   defaults: AnthropicDefaults;
   enableGatewayDiscovery: boolean;
+  pathPrefix?: string;
 }): string {
   const token = input.callerSecret ?? "copillm-local";
+  const prefix = input.pathPrefix ?? "";
   const parts: string[] = [
-    `ANTHROPIC_BASE_URL=http://127.0.0.1:${input.port}/anthropic`,
+    `ANTHROPIC_BASE_URL=http://127.0.0.1:${input.port}${prefix}/anthropic`,
     `ANTHROPIC_AUTH_TOKEN=${token}`
   ];
   if (input.defaults.opus) {

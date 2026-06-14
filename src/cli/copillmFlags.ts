@@ -20,6 +20,7 @@ export interface CopillmLaunchOpts {
   copillmUse?: string;
   copillmDebug?: boolean;
   copillmProfile?: string;
+  copillmAccount?: string;
   copillmNoConfig?: boolean;
   yolo?: boolean;
 }
@@ -75,6 +76,14 @@ export const COPILLM_FLAGS: CopillmFlagSpec[] = [
     dest: "copillmProfile",
     kind: "swallow",
     description: "Override active profile for this launch"
+  },
+  {
+    flag: "--copillm-account",
+    aliases: ["--account"],
+    takesValue: true,
+    dest: "copillmAccount",
+    kind: "swallow",
+    description: "Route this launch at a specific copillm account"
   },
   {
     flag: "--copillm-no-config",

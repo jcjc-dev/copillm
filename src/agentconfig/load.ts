@@ -141,6 +141,15 @@ function mergeAndResolve(input: {
       ? { body: instructionsBody }
       : null;
 
+  // Merge the pinned account: later layers (project over global, profile over
+  // defaults) win. Empty string is treated as unset.
+  let account: string | null = null;
+  for (const layer of layers) {
+    if (layer.account !== undefined && layer.account.trim().length > 0) {
+      account = layer.account.trim();
+    }
+  }
+
   // Merge mcp.servers map; later layers replace earlier same-named entries.
   // Defaults are always-on: a profile may override a default by name but
   // cannot remove it.
@@ -161,7 +170,7 @@ function mergeAndResolve(input: {
 
   const yolo = mergeYolo(layers);
 
-  return { instructions, mcpServers: servers, yolo, reserved };
+  return { instructions, mcpServers: servers, account, yolo, reserved };
 }
 
 /**

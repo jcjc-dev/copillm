@@ -3,7 +3,7 @@ import path from "node:path";
 import { type CopilotModel } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
 import { piAgentDir } from "../../config/home.js";
-import { resolveStartContext, type PrecomputedStartContext } from "../codex/init.js";
+import { resolveStartContext, type AccountDiscoveryOverride, type PrecomputedStartContext } from "../codex/init.js";
 
 /**
  * pi (`@earendil-works/pi-coding-agent`) reads its config from
@@ -34,6 +34,14 @@ export interface PiInitOptions {
    * `copillm pi`, `copillm env pi`, and any other one-shot invocation.
    */
   precomputed?: PrecomputedStartContext;
+  /**
+   * Path prefix to inject before `/anthropic` and `/codex/v1` in the generated
+   * provider base URLs, e.g. `/work` to route pi at the `work` account.
+   * Empty/omitted = the default account (unprefixed).
+   */
+  pathPrefix?: string;
+  /** Discover models as a specific account instead of the default. */
+  account?: AccountDiscoveryOverride;
 }
 
 export interface PiInitResult {
@@ -83,7 +91,7 @@ interface PiModelsConfig {
 }
 
 export async function generatePiHome(options: PiInitOptions): Promise<PiInitResult> {
-  const { discovery } = await resolveStartContext(options.precomputed);
+  const { discovery } = await resolveStartContext(options.precomputed, options.account);
   const eligible = discovery.models.filter(isPickerEligible);
 
   // Split the catalog by which upstream endpoint each model supports. Models
@@ -104,9 +112,10 @@ export async function generatePiHome(options: PiInitOptions): Promise<PiInitResu
     throw new Error("No models discovered for pi config.");
   }
 
-  const proxyUrl = `http://127.0.0.1:${options.port}/anthropic`;
+  const prefix = options.pathPrefix ?? "";
+  const proxyUrl = `http://127.0.0.1:${options.port}${prefix}/anthropic`;
   // OpenAI SDK posts to `<baseUrl>/responses`, so the baseUrl must include `/v1`.
-  const responsesProxyUrl = `http://127.0.0.1:${options.port}/codex/v1`;
+  const responsesProxyUrl = `http://127.0.0.1:${options.port}${prefix}/codex/v1`;
   const providerId = options.providerId.trim().length > 0 ? options.providerId : "copillm";
   const responsesProviderId = `${providerId}-responses`;
 

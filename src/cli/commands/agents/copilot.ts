@@ -3,7 +3,7 @@ import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.j
 import { loadStoredCredential } from "../../../auth/credentials.js";
 import { processCopillmArgs } from "../../copillmFlags.js";
 import { launchAgent } from "../../launchAgent.js";
-import { applyYoloForLaunch } from "./shared.js";
+import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 
 export function register(program: Command): void {
   program
@@ -15,8 +15,28 @@ export function register(program: Command): void {
     .action(
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
-        const credential = await loadStoredCredential();
-        if (!credential) {
+        let launchAccount;
+        try {
+          launchAccount = await resolveLaunchAccount({
+            flag: opts.copillmAccount,
+            envValue: process.env.COPILLM_ACCOUNT,
+            cwd: process.cwd(),
+            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+          });
+        } catch (error) {
+          process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
+          process.exit(1);
+          return;
+        }
+        if (launchAccount) {
+          process.stderr.write(`${formatLaunchAccountNotice(launchAccount)}\n`);
+        }
+        // Copilot CLI talks to GitHub directly with the account's OAuth token,
+        // so account selection picks which token to inject (not a URL prefix).
+        const githubToken = launchAccount
+          ? launchAccount.account.githubToken
+          : (await loadStoredCredential())?.token ?? null;
+        if (!githubToken) {
           process.stderr.write(
             "copillm: no stored GitHub credential — run `copillm auth login` first.\n"
           );
@@ -39,7 +59,7 @@ export function register(program: Command): void {
         // short-circuits its device-flow login when copillm already has a token.
         const env: Record<string, string> = {
           ...applyResult.envOverlay,
-          COPILOT_GITHUB_TOKEN: credential.token
+          COPILOT_GITHUB_TOKEN: githubToken
         };
         const baseArgs = [...forwarded, ...applyResult.cliArgs];
         const args = applyYoloForLaunch({ agent: "copilot", flag: opts.yolo, applyResult, baseArgs });

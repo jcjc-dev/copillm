@@ -1,5 +1,5 @@
 import { getCopillmHome } from "../../config/home.js";
-import { type PrecomputedStartContext } from "../../integrations/codex/init.js";
+import { type AccountDiscoveryOverride, type PrecomputedStartContext } from "../../integrations/codex/init.js";
 import {
   defaultOutputDir as defaultPiOutputDir,
   generatePiHome,
@@ -8,7 +8,8 @@ import {
 
 export async function refreshPiHome(
   port: number,
-  precomputed?: PrecomputedStartContext
+  precomputed?: PrecomputedStartContext,
+  opts?: { pathPrefix?: string; account?: AccountDiscoveryOverride }
 ): Promise<PiInitResult | null> {
   try {
     const home = getCopillmHome();
@@ -16,7 +17,9 @@ export async function refreshPiHome(
       outDir: defaultPiOutputDir(home),
       port,
       providerId: "copillm",
-      precomputed
+      precomputed,
+      pathPrefix: opts?.pathPrefix,
+      account: opts?.account
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";

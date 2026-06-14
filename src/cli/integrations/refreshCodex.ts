@@ -1,10 +1,16 @@
 import { getCopillmHome } from "../../config/home.js";
-import { defaultOutputDir, generateCodexHome, type PrecomputedStartContext } from "../../integrations/codex/init.js";
+import {
+  defaultOutputDir,
+  generateCodexHome,
+  type AccountDiscoveryOverride,
+  type PrecomputedStartContext
+} from "../../integrations/codex/init.js";
 
 export async function refreshCodexHome(
   port: number,
   model: string | null,
-  precomputed?: PrecomputedStartContext
+  precomputed?: PrecomputedStartContext,
+  opts?: { pathPrefix?: string; account?: AccountDiscoveryOverride }
 ): Promise<null | Awaited<ReturnType<typeof generateCodexHome>>> {
   try {
     const home = getCopillmHome();
@@ -14,7 +20,9 @@ export async function refreshCodexHome(
       port,
       providerId: "copillm",
       reasoningEffort: null,
-      precomputed
+      precomputed,
+      pathPrefix: opts?.pathPrefix,
+      account: opts?.account
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";

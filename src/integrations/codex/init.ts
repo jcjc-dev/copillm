@@ -25,6 +25,28 @@ export interface CodexInitOptions {
    * codex`, and any other standalone caller continues to work as before.
    */
   precomputed?: PrecomputedStartContext;
+  /**
+   * Path prefix to inject before `/codex/v1` in the generated `base_url`,
+   * e.g. `/work` to route Codex at the `work` account. Empty/omitted = the
+   * default account (unprefixed).
+   */
+  pathPrefix?: string;
+  /**
+   * Discover models as a specific account (its token + per-account cache)
+   * instead of the default. Used when launching against a named account so
+   * the default-model pick reflects that account's catalog.
+   */
+  account?: AccountDiscoveryOverride;
+}
+
+/**
+ * Override for model discovery so codex/pi home generation reflects a specific
+ * account's catalog (and writes to that account's model cache).
+ */
+export interface AccountDiscoveryOverride {
+  accountType: AppConfig["accountType"];
+  githubToken: string;
+  cacheId: string | undefined;
 }
 
 /**
@@ -53,14 +75,15 @@ export interface CodexInitResult {
 }
 
 export async function generateCodexHome(options: CodexInitOptions): Promise<CodexInitResult> {
-  const { discovery } = await resolveStartContext(options.precomputed);
+  const { discovery } = await resolveStartContext(options.precomputed, options.account);
   const catalog = buildCodexCatalog(discovery.models);
   if (catalog.models.length === 0) {
     throw new Error("No Codex-eligible models found in the live catalog.");
   }
 
   const port = options.port;
-  const proxyUrl = `http://127.0.0.1:${port}/codex/v1`;
+  const prefix = options.pathPrefix ?? "";
+  const proxyUrl = `http://127.0.0.1:${port}${prefix}/codex/v1`;
   const baseUrl = proxyUrl;
   const defaultModel = options.model ?? pickDefaultModel(catalog.models.map((model) => model.slug));
   if (!catalog.models.some((model) => model.slug === defaultModel)) {
@@ -100,11 +123,22 @@ export async function generateCodexHome(options: CodexInitOptions): Promise<Code
  * Exported so `generatePiHome` (and any future agent init) can use the
  * same loader and the same "if precomputed, reuse it" contract.
  */
-export async function resolveStartContext(precomputed?: PrecomputedStartContext): Promise<PrecomputedStartContext> {
+export async function resolveStartContext(
+  precomputed?: PrecomputedStartContext,
+  account?: AccountDiscoveryOverride
+): Promise<PrecomputedStartContext> {
   if (precomputed) {
     return precomputed;
   }
   const config = loadConfig();
+  if (account) {
+    const discovery = await listModelsUnion(account.accountType, account.githubToken, 3, undefined, account.cacheId);
+    return {
+      config,
+      creds: { token: account.githubToken, accountType: account.accountType, source: "session" },
+      discovery
+    };
+  }
   const creds = await loadStoredCredential();
   if (!creds) {
     throw new Error("Not authenticated. Run `copillm login` first.");

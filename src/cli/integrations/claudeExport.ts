@@ -8,16 +8,19 @@ import {
 
 export function buildClaudeExportCommand(
   port: number,
-  callerSecret: null | string
+  callerSecret: null | string,
+  opts?: { pathPrefix?: string; cacheId?: string }
 ): { command: string; defaults: AnthropicDefaults; bundle: ClaudeEnvBundle } {
-  const modelIds = readModelIdsFromCache();
+  const pathPrefix = opts?.pathPrefix ?? "";
+  const modelIds = readModelIdsFromCache(opts?.cacheId);
   const defaults = computeAnthropicDefaults(modelIds);
   const command = buildClaudeExport({
     port,
     callerSecret,
     defaults,
-    enableGatewayDiscovery: true
+    enableGatewayDiscovery: true,
+    pathPrefix
   });
-  const bundle = buildClaudeEnvBundle({ port, callerSecret, defaults, enableGatewayDiscovery: true });
+  const bundle = buildClaudeEnvBundle({ port, callerSecret, defaults, enableGatewayDiscovery: true, pathPrefix });
   return { command, defaults, bundle };
 }
