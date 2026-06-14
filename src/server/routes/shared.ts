@@ -1,5 +1,6 @@
 import type { IncomingMessage } from "node:http";
 import { stripOneMillionAlias } from "../../translation/openaiAnthropic.js";
+import { isValidAccountId } from "../../config/accountId.js";
 import { JsonRequestParseError } from "../errors.js";
 
 export async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -142,44 +143,101 @@ export interface RequestRoute {
     | "debug"
     | "not_found";
   anthroShape: boolean;
+  /**
+   * The account selected by a leading `/<account>` path segment, or `null` for
+   * the default account (the common, unprefixed case). Only the agent-facing
+   * proxy + per-account model routes can be prefixed; daemon-global routes
+   * (`/livez`, `/healthz`, `/models`, `/_debug`) never are.
+   */
+  accountId: string | null;
+}
+
+// First path segments that belong to real routes and must never be mistaken
+// for an account prefix. (Direct matching already wins for these, so this is
+// belt-and-suspenders against contrived nested paths.)
+const RESERVED_FIRST_SEGMENTS: ReadonlySet<string> = new Set([
+  "livez",
+  "healthz",
+  "models",
+  "v1",
+  "codex",
+  "anthropic",
+  "_debug"
+]);
+
+// Only these routes may be addressed with an `/<account>` prefix. The generic
+// `/models` discovery route and all health/debug routes stay global.
+const PREFIXABLE_KINDS: ReadonlySet<RequestRoute["kind"]> = new Set([
+  "codex_models",
+  "anthropic_models",
+  "codex_responses",
+  "openai",
+  "anthropic"
+]);
+
+function matchRoute(method: string, pathname: string): RequestRoute | null {
+  if (method === "GET" && pathname === "/livez") {
+    return { kind: "livez", anthroShape: false, accountId: null };
+  }
+  if (method === "GET" && pathname === "/healthz") {
+    return { kind: "healthz", anthroShape: false, accountId: null };
+  }
+  if (method === "GET" && (pathname === "/models" || pathname === "/v1/models")) {
+    return { kind: "models", anthroShape: false, accountId: null };
+  }
+  if (method === "GET" && pathname === "/codex/v1/models") {
+    return { kind: "codex_models", anthroShape: false, accountId: null };
+  }
+  if (method === "GET" && pathname === "/anthropic/v1/models") {
+    return { kind: "anthropic_models", anthroShape: false, accountId: null };
+  }
+  if (method === "POST" && pathname === "/codex/v1/responses") {
+    return { kind: "codex_responses", anthroShape: false, accountId: null };
+  }
+  if (method === "GET" && pathname === "/_debug") {
+    return { kind: "debug", anthroShape: false, accountId: null };
+  }
+  if (method === "POST" && pathname === "/v1/chat/completions") {
+    return { kind: "openai", anthroShape: false, accountId: null };
+  }
+  if (method === "POST" && (pathname === "/anthropic/v1/messages" || pathname === "/v1/messages")) {
+    return { kind: "anthropic", anthroShape: true, accountId: null };
+  }
+  return null;
 }
 
 export function resolveRoute(method: string | undefined, rawUrl: string | undefined): RequestRoute {
   if (!method || !rawUrl) {
-    return { kind: "not_found", anthroShape: false };
+    return { kind: "not_found", anthroShape: false, accountId: null };
   }
   let pathname: string;
   try {
     pathname = new URL(rawUrl, "http://127.0.0.1").pathname;
   } catch {
-    return { kind: "not_found", anthroShape: false };
+    return { kind: "not_found", anthroShape: false, accountId: null };
   }
-  if (method === "GET" && pathname === "/livez") {
-    return { kind: "livez", anthroShape: false };
+
+  // Try the path as-is first. This keeps every existing (unprefixed) route
+  // working unchanged and ensures a reserved first segment like `/codex/...`
+  // is always interpreted as a route, never as an account named "codex".
+  const direct = matchRoute(method, pathname);
+  if (direct) {
+    return direct;
   }
-  if (method === "GET" && pathname === "/healthz") {
-    return { kind: "healthz", anthroShape: false };
+
+  // Otherwise, peel an optional leading `/<account>` segment and re-match the
+  // remainder against the prefixable routes.
+  const prefixMatch = pathname.match(/^\/([^/]+)(\/.*)$/);
+  if (prefixMatch) {
+    const candidate = prefixMatch[1];
+    const rest = prefixMatch[2];
+    if (isValidAccountId(candidate) && !RESERVED_FIRST_SEGMENTS.has(candidate)) {
+      const sub = matchRoute(method, rest);
+      if (sub && PREFIXABLE_KINDS.has(sub.kind)) {
+        return { ...sub, accountId: candidate };
+      }
+    }
   }
-  if (method === "GET" && (pathname === "/models" || pathname === "/v1/models")) {
-    return { kind: "models", anthroShape: false };
-  }
-  if (method === "GET" && pathname === "/codex/v1/models") {
-    return { kind: "codex_models", anthroShape: false };
-  }
-  if (method === "GET" && pathname === "/anthropic/v1/models") {
-    return { kind: "anthropic_models", anthroShape: false };
-  }
-  if (method === "POST" && pathname === "/codex/v1/responses") {
-    return { kind: "codex_responses", anthroShape: false };
-  }
-  if (method === "GET" && pathname === "/_debug") {
-    return { kind: "debug", anthroShape: false };
-  }
-  if (method === "POST" && pathname === "/v1/chat/completions") {
-    return { kind: "openai", anthroShape: false };
-  }
-  if (method === "POST" && (pathname === "/anthropic/v1/messages" || pathname === "/v1/messages")) {
-    return { kind: "anthropic", anthroShape: true };
-  }
-  return { kind: "not_found", anthroShape: false };
+
+  return { kind: "not_found", anthroShape: false, accountId: null };
 }
