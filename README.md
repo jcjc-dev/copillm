@@ -60,6 +60,38 @@ copillm claude --model opus
 copillm codex --help
 ```
 
+## Multiple accounts
+
+copillm can hold more than one GitHub account at once and serve them from the
+same daemon. If you only ever use one account, nothing changes — you never see
+any of this.
+
+```bash
+# Your first login is the default account (no naming needed).
+copillm auth login
+
+# Add another account under a name of your choice.
+copillm auth login --as work
+copillm auth login --as work --account-type business   # set its plan type
+
+# See every account; the default is marked with *.
+copillm auth status
+
+# Change which account is the default.
+copillm auth switch work
+
+# Log out of one account, or all of them.
+copillm auth logout --account work
+copillm auth logout --all
+```
+
+The **default account** is what every agent and the model endpoints use unless
+told otherwise. `copillm auth status` lists each account with its plan type and
+whether a credential is stored; tokens are never printed.
+
+Different accounts can be entitled to different models, so each account keeps
+its own model list.
+
 ## Documentation
 
 Full documentation is published at **[jcjc-dev.github.io/copillm](https://jcjc-dev.github.io/copillm/)**.
