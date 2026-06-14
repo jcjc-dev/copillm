@@ -170,6 +170,40 @@ describe("auth multi-account CLI", () => {
     expect(res.exitCode).toBe(1);
   });
 
+  it("switch prompts a restart and reports restart_required when a daemon is running", async () => {
+    loginMock.mockResolvedValueOnce("tok-octocat");
+    await runCli(["auth", "login", "--force-session"]);
+    loginMock.mockResolvedValueOnce("tok-work");
+    await runCli(["auth", "login", "--as", "work", "--force-session"]);
+
+    const { acquireLock, releaseLock } = await import("../../src/server/lock.js");
+    await acquireLock(4141); // lock holds this (alive) test process's pid
+    try {
+      const human = await runCli(["auth", "switch", "work"]);
+      expect(human.stdout).toContain("copillm restart");
+
+      const json = await runCli(["auth", "switch", "work", "--json"]);
+      const payload = JSON.parse(json.stdout) as { restart_required: boolean };
+      expect(payload.restart_required).toBe(true);
+    } finally {
+      releaseLock();
+    }
+  });
+
+  it("switch does not prompt a restart when no daemon is running", async () => {
+    loginMock.mockResolvedValueOnce("tok-octocat");
+    await runCli(["auth", "login", "--force-session"]);
+    loginMock.mockResolvedValueOnce("tok-work");
+    await runCli(["auth", "login", "--as", "work", "--force-session"]);
+
+    const human = await runCli(["auth", "switch", "work"]);
+    expect(human.stdout).not.toContain("restart");
+
+    const json = await runCli(["auth", "switch", "work", "--json"]);
+    const payload = JSON.parse(json.stdout) as { restart_required: boolean };
+    expect(payload.restart_required).toBe(false);
+  });
+
   it("logout --account removes one account and reassigns the default", async () => {
     loginMock.mockResolvedValueOnce("tok-octocat");
     await runCli(["auth", "login", "--force-session"]);
