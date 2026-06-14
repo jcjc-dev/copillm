@@ -92,6 +92,30 @@ whether a credential is stored; tokens are never printed.
 Different accounts can be entitled to different models, so each account keeps
 its own model list.
 
+### Launching an agent against a specific account
+
+Point any agent at a non-default account for a single launch with `--account`,
+or set `COPILLM_ACCOUNT` in the environment:
+
+```bash
+copillm codex --account work
+COPILLM_ACCOUNT=work copillm claude
+```
+
+To make it automatic, pin an account to a profile in `~/.copillm/agent.toml`
+(or a project's `.copillm/agent.toml`):
+
+```toml
+[profiles.work]
+account = "work"
+```
+
+Then `copillm codex --profile work` always uses the `work` account. Precedence
+is `--account` > `COPILLM_ACCOUNT` > the profile's pinned account > the default
+account. copillm prints a short notice such as `using account "work" (from
+profile)` so you always know which account a launch is using, and refuses to
+launch with a clear error if the account isn't one you've logged into.
+
 ## Documentation
 
 Full documentation is published at **[jcjc-dev.github.io/copillm](https://jcjc-dev.github.io/copillm/)**.

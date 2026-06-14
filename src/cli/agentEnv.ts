@@ -29,12 +29,14 @@ export function buildClaudeEnvBundle(input: {
   callerSecret: null | string;
   defaults?: AnthropicDefaults;
   enableGatewayDiscovery?: boolean;
+  pathPrefix?: string;
 }): ClaudeEnvBundle {
   const defaults = input.defaults ?? computeAnthropicDefaults(readModelIdsFromCache());
   const enableGateway = input.enableGatewayDiscovery !== false;
+  const prefix = input.pathPrefix ?? "";
 
   const env: Record<string, string> = {
-    ANTHROPIC_BASE_URL: `http://127.0.0.1:${input.port}/anthropic`,
+    ANTHROPIC_BASE_URL: `http://127.0.0.1:${input.port}${prefix}/anthropic`,
     ANTHROPIC_AUTH_TOKEN: input.callerSecret ?? "copillm-local",
     // Point Claude at a copillm-owned config home so copillm-launched Claude
     // never reads/writes the user's real ~/.claude (and dev mode isolates it).

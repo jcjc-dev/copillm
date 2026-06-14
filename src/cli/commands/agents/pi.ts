@@ -6,7 +6,7 @@ import { ensureDaemonRunningForLauncher } from "../../daemon/ensureRunning.js";
 import { launchAgent } from "../../launchAgent.js";
 import { refreshPiHome } from "../../integrations/refreshPi.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
-import { applyYoloForLaunch } from "./shared.js";
+import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 
 export function register(program: Command): void {
   program
@@ -19,9 +19,28 @@ export function register(program: Command): void {
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
         const debug = resolveCopillmDebug(opts.copillmDebug);
+        let launchAccount;
+        try {
+          launchAccount = await resolveLaunchAccount({
+            flag: opts.copillmAccount,
+            envValue: process.env.COPILLM_ACCOUNT,
+            cwd: process.cwd(),
+            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+          });
+        } catch (error) {
+          process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
+          process.exit(1);
+          return;
+        }
+        if (launchAccount) {
+          process.stderr.write(`${formatLaunchAccountNotice(launchAccount)}\n`);
+        }
         enableRuntimeDebug(debug);
         const lock = await ensureDaemonRunningForLauncher({ debug });
-        const pi = await refreshPiHome(lock.port);
+        const pi = await refreshPiHome(lock.port, undefined, {
+          pathPrefix: launchAccount?.pathPrefix,
+          account: launchAccount?.account
+        });
         if (!pi) {
           throw new Error("Failed to prepare pi models.json (see warning above).");
         }

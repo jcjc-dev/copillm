@@ -84,6 +84,12 @@ const SectionSchema = z
     instructions: InstructionsSchema.optional(),
     mcp: McpSchema.optional(),
     yolo: YoloSchema.optional(),
+    /**
+     * Pin a copillm account for launches that use this profile. The launcher
+     * routes the agent at this account unless overridden by `--account` /
+     * `COPILLM_ACCOUNT`. Must name an account from `copillm auth status`.
+     */
+    account: z.string().min(1).optional(),
     // v1 reserved sections: validated as objects but not interpreted.
     skills: PassthroughRecord.optional(),
     agents: PassthroughRecord.optional(),
@@ -107,6 +113,11 @@ export type AgentToml = z.infer<typeof AgentTomlSchema>;
 export interface ResolvedProfile {
   instructions: { body: string } | null;
   mcpServers: Record<string, McpServerEntry>;
+  /**
+   * Account this profile pins launches to, or null when unset. The launcher
+   * applies precedence `--account` > `COPILLM_ACCOUNT` > this > default.
+   */
+  account: string | null;
   /**
    * Merged yolo settings from defaults + active profile. Null when no layer
    * declared a [...yolo] block; callers should treat that as "no opinion" and
