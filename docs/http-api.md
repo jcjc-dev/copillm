@@ -104,6 +104,8 @@ Transport-level failures *inside* the daemon (a panic, malformed upstream stream
 
 copillm translates between OpenAI and Anthropic wire formats and Copilot's upstream. Current behavior:
 
-- **OpenAI-to-Anthropic content parts:** text parts only (no image parts yet).
+- **Anthropic-to-OpenAI image input:** Anthropic `image` content blocks in user messages — both `base64` and `url` sources — are forwarded to Copilot as standard image parts, so vision-capable models can read them. Sending an image to a text-only model surfaces as a normal upstream error.
+- **Sampling parameters:** `temperature`, `top_p`, and `stop_sequences` on an Anthropic request are forwarded upstream (`stop_sequences` maps to OpenAI `stop`). `top_k` has no upstream equivalent and is dropped.
+- **OpenAI-to-Anthropic content parts:** model responses are text and tool-use only (responses never carry image parts).
 - **`tool_result` errors:** Anthropic `tool_result` blocks with `is_error: true` are translated into the OpenAI `tool` role (which has no `is_error` field) with the content prefixed by `[tool_error] ` so the assistant still sees that the tool failed. This lets coding agents recover from tool failures (e.g. a failed `Bash` invocation or MCP tool error) instead of the whole conversation 400ing.
 - **`[1m]` model id suffix:** Ids advertised on `/anthropic/v1/models` may carry a `[1m]` suffix when the upstream model reports `max_context_window_tokens >= 1_000_000`. The suffix is stripped back off before any request is forwarded upstream, so canonical model ids are always what Copilot sees. See [the Claude Code guide](../claude-code/#context-windows-and-the-1m-alias) for why.
