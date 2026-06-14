@@ -30,6 +30,8 @@ export interface StubProxyHarness {
   port: number;
   baseUrl: string;
   upstreamBaseUrl: string;
+  /** The caller secret the proxy was started with, or null when disabled. */
+  callerSecret: string | null;
   setHandlers: (handlers: StubProxyHandlers) => void;
   close: () => Promise<void>;
 }
@@ -58,7 +60,9 @@ function restoreEnv(): void {
   }
 }
 
-export async function startStubProxyHarness(): Promise<StubProxyHarness> {
+export async function startStubProxyHarness(options?: {
+  requireCallerSecret?: boolean;
+}): Promise<StubProxyHarness> {
   let currentHandlers: StubProxyHandlers = {};
   const upstream = await startStubUpstream({
     handlers: () => currentHandlers
@@ -70,10 +74,13 @@ export async function startStubProxyHarness(): Promise<StubProxyHarness> {
   // refresh fires mid-test).
   setEnv("COPILLM_TOKEN_EXCHANGE_URL", `${upstream.baseUrl}/__token`);
 
+  const requireCallerSecret = options?.requireCallerSecret ?? false;
+  const callerSecret = requireCallerSecret ? "test-caller-secret" : null;
+
   const logger = pino({ level: "silent" });
   const config: AppConfig = {
     preferredPort: 0,
-    requireCallerSecret: false,
+    requireCallerSecret,
     selectedModels: [],
     accountType: "individual"
   };
@@ -87,7 +94,7 @@ export async function startStubProxyHarness(): Promise<StubProxyHarness> {
     config,
     logger,
     tokenManager,
-    callerSecret: null,
+    callerSecret,
     githubToken: "stub-github-token"
   });
 
@@ -95,6 +102,7 @@ export async function startStubProxyHarness(): Promise<StubProxyHarness> {
     port,
     baseUrl: `http://127.0.0.1:${port}`,
     upstreamBaseUrl: upstream.baseUrl,
+    callerSecret,
     setHandlers(handlers: StubProxyHandlers): void {
       currentHandlers = handlers;
     },
