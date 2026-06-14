@@ -8,6 +8,7 @@ import {
 } from "../../auth/credentials.js";
 import {
   readAccountsIndex,
+  findAccount,
   assertValidAccountId,
   InvalidAccountIdError,
   UnknownAccountError
@@ -17,7 +18,8 @@ import {
   listAccountsDetailed,
   removeAccountAndCredential,
   removeAllAccounts,
-  switchDefaultAccount
+  switchDefaultAccount,
+  type AddAccountResult
 } from "../../auth/accountManager.js";
 import { loginViaDeviceFlow } from "../../auth/deviceFlow.js";
 import { inspectGithubIdentity } from "../../auth/githubIdentity.js";
@@ -79,37 +81,78 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
   const saveMode = options.forceSession ? "session" : "auto";
   const index = readAccountsIndex();
 
-  // Pure single-account login: no index and no explicit name. Preserve the
-  // historical behaviour exactly — legacy storage, no accounts index created.
-  if (!index && !namedRequested) {
-    const backend = await saveStoredCredential(token, accountType, { mode: saveMode });
-    writeCommandOutput(opts, `Login succeeded. Credentials stored via ${describeBackend(backend)}.`, {
-      status: "ok",
-      action: "login",
-      credential_backend: backend
-    });
+  // ---- Explicit name (`--as`) -------------------------------------------
+  if (namedRequested) {
+    const accountId = opts.as!.trim();
+    // First time we materialize the index via an explicit name: preserve any
+    // pre-existing single account as the default so its token isn't clobbered.
+    if (!index) {
+      const existing = await loadStoredCredential();
+      if (existing) {
+        const existingId = (await deriveAccountId(existing.token)) ?? "default";
+        if (existingId !== accountId) {
+          registerExistingCredentialAsDefault(existingId, existing.accountType);
+        }
+      }
+    }
+    const result = await addAccount({ id: accountId, accountType, token, mode: saveMode });
+    emitLoginResult(opts, result, false);
     return;
   }
 
-  const accountId = namedRequested ? opts.as!.trim() : index!.defaultAccount;
+  // ---- No name: auto-manage by the token's GitHub login -----------------
+  // Deriving the login lets `copillm auth login` recognise when a *different*
+  // GitHub account is signing in and keep both, instead of silently
+  // overwriting the previous one. A same-account re-login refreshes in place.
+  const newLogin = await deriveAccountId(token);
 
-  // First time we materialize the index via an explicit name: preserve any
-  // pre-existing single account as the default so its token isn't clobbered.
-  if (!index && namedRequested) {
+  if (index) {
+    // Add the new login as its own account (or refresh it if already known);
+    // when the login can't be determined, refresh the default account.
+    const targetId = newLogin ?? index.defaultAccount;
+    const wasKnown = findAccount(targetId) !== null;
+    const result = await addAccount({ id: targetId, accountType, token, mode: saveMode });
+    emitLoginResult(opts, result, !wasKnown && !result.isDefault);
+    return;
+  }
+
+  // No accounts index yet. If a *different* GitHub account is signing in, move
+  // to multi-account instead of overwriting the existing single credential.
+  if (newLogin) {
     const existing = await loadStoredCredential();
     if (existing) {
-      const existingId = (await deriveAccountId(existing.token)) ?? "default";
-      if (existingId !== accountId) {
-        registerExistingCredentialAsDefault(existingId, existing.accountType);
+      const existingLogin = await deriveAccountId(existing.token);
+      if (existingLogin !== newLogin) {
+        // Different (or undeterminable) account → preserve the prior login as
+        // the default and add the new one alongside it.
+        registerExistingCredentialAsDefault(existingLogin ?? "default", existing.accountType);
+        const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
+        emitLoginResult(opts, result, !result.isDefault);
+        return;
       }
+      // Same account → fall through to an in-place single-account refresh.
     }
   }
 
-  const result = await addAccount({ id: accountId, accountType, token, mode: saveMode });
+  // Single-account login: no prior credential, the same account re-logging in,
+  // or an undeterminable login. Preserve the historical behaviour exactly —
+  // legacy storage, no accounts index created.
+  const backend = await saveStoredCredential(token, accountType, { mode: saveMode });
+  writeCommandOutput(opts, `Login succeeded. Credentials stored via ${describeBackend(backend)}.`, {
+    status: "ok",
+    action: "login",
+    credential_backend: backend
+  });
+}
+
+function emitLoginResult(opts: AuthLoginOpts, result: AddAccountResult, hintSwitch: boolean): void {
   const defaultSuffix = result.isDefault ? " (default)" : "";
+  const switchHint = hintSwitch
+    ? ` It is not the default — run \`copillm auth switch ${result.id}\` to make it so.`
+    : "";
   writeCommandOutput(
     opts,
-    `Login succeeded for account "${result.id}"${defaultSuffix}. Credentials stored via ${describeBackend(result.backend)}.`,
+    `Login succeeded for account "${result.id}"${defaultSuffix}. Credentials stored via ${describeBackend(result.backend)}.${switchHint}`,
     {
       status: "ok",
       action: "login",
