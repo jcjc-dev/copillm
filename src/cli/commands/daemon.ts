@@ -20,6 +20,8 @@ import { isDevModeActive } from "../shared/devMode.js";
 import { writeCommandOutput, writeHealthOutput } from "../shared/output.js";
 import { spawnDetachedDaemon } from "../daemon/spawnDetached.js";
 import { resolveRestartDecision, type DaemonLockState } from "../daemon/restart.js";
+import { selfUpdateToLatest, describeSelfUpdate, type SelfUpdateResult } from "../daemon/selfUpdate.js";
+import { getPackageInfo } from "../packageInfo.js";
 
 export function register(program: Command): void {
   program
@@ -197,6 +199,17 @@ export function register(program: Command): void {
       const decision = resolveRestartDecision({ lock: lockSnapshot, detectedDebug, forceDebug });
       enableRuntimeDebug(decision.debug);
 
+      // Self-update to the latest published version before respawning. The old
+      // daemon is still serving here, so an `npm install -g` (which overwrites
+      // the files the new daemon will be spawned from) only updates the code
+      // the *next* daemon runs, never the one currently up. Best-effort: a
+      // failure or offline registry just restarts on the installed version.
+      const selfUpdate = await selfUpdateToLatest(getPackageInfo());
+      const selfUpdateNote = describeSelfUpdate(selfUpdate, getPackageInfo().name);
+      if (selfUpdateNote && !opts.json) {
+        process.stderr.write(`${selfUpdateNote}\n`);
+      }
+
       if (decision.action === "restart" && decision.previousPid !== null) {
         await stopByPid(decision.previousPid);
       } else if (decision.clearStaleLock) {
@@ -209,7 +222,8 @@ export function register(program: Command): void {
       const started = await spawnDetachedDaemon({ debug: decision.debug, forcePort: decision.forcePort });
       await emitDetachedStartOutput(opts, started, decision.debug, "restarted", {
         previousPid: decision.previousPid,
-        claudeCache: cache
+        claudeCache: cache,
+        selfUpdate
       });
     });
 
@@ -411,7 +425,11 @@ async function emitDetachedStartOutput(
   started: { pid: number; port: number },
   debug: boolean,
   mode: "detached" | "restarted",
-  extra?: { previousPid?: number | null; claudeCache?: { cleared: boolean; reason: null | string } }
+  extra?: {
+    previousPid?: number | null;
+    claudeCache?: { cleared: boolean; reason: null | string };
+    selfUpdate?: SelfUpdateResult;
+  }
 ): Promise<void> {
   const shared = await loadSharedStartContextIfNeeded(opts);
   const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, shared);
@@ -454,6 +472,9 @@ async function emitDetachedStartOutput(
   }
   if (extra?.claudeCache !== undefined) {
     payload.claude_cache = extra.claudeCache;
+  }
+  if (extra?.selfUpdate !== undefined) {
+    payload.self_update = extra.selfUpdate;
   }
   writeCommandOutput(opts, banner, payload);
 }

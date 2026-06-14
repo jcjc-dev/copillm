@@ -46,6 +46,8 @@ copillm [--debug] restart [--json]
 
 The restarted daemon keeps the port it was already serving and preserves its current debug mode automatically — pass `--debug` only when you want to turn diagnostics on. Like [`copillm stop`](#copillm-stop), a restart clears the Claude Code gateway model cache. If no daemon is running, `restart` just starts one with default settings.
 
+When copillm was installed globally with npm, `restart` also updates copillm to the latest published version before bringing the daemon back up, so the restarted daemon runs the newest code. This is best-effort: if the registry can't be reached or the install isn't permitted, the restart simply proceeds on the version you already have and prints a short note. It is skipped automatically when you're running a local or development build.
+
 ## `copillm stop`
 
 Stop the running daemon.
