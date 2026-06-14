@@ -9,7 +9,6 @@ import {
 } from "../../auth/credentials.js";
 import {
   readAccountsIndex,
-  findAccount,
   assertValidAccountId,
   InvalidAccountIdError,
   UnknownAccountError
@@ -27,7 +26,7 @@ import { inspectGithubIdentity } from "../../auth/githubIdentity.js";
 import { loadConfig } from "../../config/config.js";
 import { inspectLock, releaseLock } from "../../server/lock.js";
 import { stopByPid } from "../daemon/lifecycle.js";
-import { describeBackend, formatHumanAuthStatusLine } from "../shared/backends.js";
+import { describeBackend } from "../shared/backends.js";
 import { writeCommandOutput } from "../shared/output.js";
 
 export interface AuthLoginOpts {
@@ -107,8 +106,8 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
         }
       }
     }
-    const result = await addAccount({ id: accountId, accountType, token, mode: saveMode });
-    emitLoginResult(opts, result, false);
+    const result = await addAccount({ id: accountId, accountType, token, mode: saveMode, makeDefault: true });
+    emitLoginResult(opts, result);
     return;
   }
 
@@ -125,8 +124,8 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
     if (index) {
       // An index exists but its default account has no credential — restore it.
       const targetId = newLogin ?? index.defaultAccount;
-      const result = await addAccount({ id: targetId, accountType, token, mode: saveMode });
-      emitLoginResult(opts, result, !result.isDefault);
+      const result = await addAccount({ id: targetId, accountType, token, mode: saveMode, makeDefault: true });
+      emitLoginResult(opts, result);
       return;
     }
     // Fresh single-account install: store without creating an index.
@@ -154,9 +153,10 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
 
   if (index) {
     // Add the new login as its own account, or refresh it in place if known.
-    const wasKnown = findAccount(newLogin) !== null;
-    const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
-    emitLoginResult(opts, result, !wasKnown && !result.isDefault);
+    // The just-signed-in account becomes the default — that's the account you
+    // clearly intend to use right now.
+    const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode, makeDefault: true });
+    emitLoginResult(opts, result);
     return;
   }
 
@@ -174,29 +174,23 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
   }
 
   // A different (or unverifiable) prior account → transition to multi-account,
-  // preserving the prior login as the default and adding the new one.
+  // preserving the prior login and making the just-signed-in account the
+  // default (the one you clearly intend to use now).
   registerExistingCredentialAsDefault(existingLogin ?? "default", existing.accountType);
-  const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
-  emitLoginResult(opts, result, !result.isDefault);
+  const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode, makeDefault: true });
+  emitLoginResult(opts, result);
 }
 
-function emitLoginResult(opts: AuthLoginOpts, result: AddAccountResult, hintSwitch: boolean): void {
-  const defaultSuffix = result.isDefault ? " (default)" : "";
-  const switchHint = hintSwitch
-    ? ` It is not the default — run \`copillm auth switch ${result.id}\` to make it so.`
-    : "";
-  writeCommandOutput(
-    opts,
-    `Login succeeded for account "${result.id}"${defaultSuffix}. Credentials stored via ${describeBackend(result.backend)}.${switchHint}`,
-    {
-      status: "ok",
-      action: "login",
-      account: result.id,
-      account_type: result.accountType,
-      is_default: result.isDefault,
-      credential_backend: result.backend
-    }
-  );
+function emitLoginResult(opts: AuthLoginOpts, result: AddAccountResult): void {
+  const defaultNote = result.isDefault ? " — now the default account" : "";
+  writeCommandOutput(opts, `Logged in as "${result.id}"${defaultNote}.`, {
+    status: "ok",
+    action: "login",
+    account: result.id,
+    account_type: result.accountType,
+    is_default: result.isDefault,
+    credential_backend: result.backend
+  });
 }
 
 async function stopRunningDaemon(): Promise<void> {
@@ -359,14 +353,30 @@ export async function runAuthStatusList(opts: { json?: boolean; user?: boolean }
     return { anyStored };
   }
 
-  process.stdout.write(`copillm — ${enriched.length} account(s)\n`);
-  for (const account of enriched) {
+  // Human view: lead with the default account (the one in use right now),
+  // then a compact, aligned list. Avoid repeating the same login three times —
+  // the account id is the handle; show extra detail only when it adds something.
+  const ordered = [...enriched].sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
+  const idWidth = Math.min(32, Math.max(...ordered.map((a) => a.id.length)));
+  const defaultId = listing.defaultAccount ?? ordered.find((a) => a.isDefault)?.id ?? null;
+
+  const header = defaultId
+    ? `copillm — ${enriched.length} account${enriched.length === 1 ? "" : "s"} · default: ${defaultId}`
+    : `copillm — ${enriched.length} account${enriched.length === 1 ? "" : "s"}`;
+  process.stdout.write(`${header}\n\n`);
+
+  for (const account of ordered) {
     const marker = account.isDefault ? "*" : " ";
-    const who = account.login ? ` @${account.login}` : "";
-    const state = account.stored
-      ? formatHumanAuthStatusLine(account.backend, account.login ? { login: account.login, name: account.name } : null)
-      : "no credential";
-    process.stdout.write(`${marker} ${account.id}  [${account.accountType}]${who}  — ${state}\n`);
+    const notes: string[] = [];
+    if (account.isDefault) notes.push("default");
+    if (!account.stored) notes.push("no credential");
+    // Only surface the GitHub login when it differs from the account id (e.g. a
+    // custom --as name); otherwise it's redundant.
+    if (account.login && account.login !== account.id) notes.push(`@${account.login}`);
+    const noteStr = notes.length > 0 ? `  (${notes.join(", ")})` : "";
+    process.stdout.write(`  ${marker} ${account.id.padEnd(idWidth)}${noteStr}\n`);
   }
+
+  process.stdout.write(`\nSwitch default: copillm auth switch <account>   ·   per launch: --account <account>\n`);
   return { anyStored };
 }

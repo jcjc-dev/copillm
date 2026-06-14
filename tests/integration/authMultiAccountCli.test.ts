@@ -104,15 +104,17 @@ describe("auth multi-account CLI", () => {
     const res = await runCli(["auth", "login", "--as", "work", "--account-type", "business", "--force-session", "--json"]);
     const payload = JSON.parse(res.stdout) as { account: string; is_default: boolean; account_type: string };
     expect(payload.account).toBe("work");
-    expect(payload.is_default).toBe(false);
+    // The just-signed-in account becomes the default.
+    expect(payload.is_default).toBe(true);
     expect(payload.account_type).toBe("business");
 
-    // Index now has the materialized default (octocat) plus work.
+    // Index has the materialized prior account (octocat) plus work, and work
+    // is now the default.
     const index = JSON.parse(fs.readFileSync(path.join(tmpHome, "accounts.json"), "utf8")) as {
       defaultAccount: string;
       accounts: { id: string; storage: string }[];
     };
-    expect(index.defaultAccount).toBe("octocat");
+    expect(index.defaultAccount).toBe("work");
     expect(index.accounts.map((a) => a.id).sort()).toEqual(["octocat", "work"]);
     expect(index.accounts.find((a) => a.id === "octocat")?.storage).toBe("legacy");
     expect(index.accounts.find((a) => a.id === "work")?.storage).toBe("namespaced");
@@ -132,8 +134,9 @@ describe("auth multi-account CLI", () => {
     };
     expect(res.exitCode).toBe(0);
     expect(payload.status).toBe("logged_in");
-    expect(payload.default).toBe("octocat");
-    expect(payload.accounts.find((a) => a.id === "octocat")?.default).toBe(true);
+    // The most recently logged-in account (work) is the default.
+    expect(payload.default).toBe("work");
+    expect(payload.accounts.find((a) => a.id === "work")?.default).toBe(true);
     expect(payload.accounts.find((a) => a.id === "work")?.user?.login).toBe("work-login");
     // Token-leak guard.
     expect(res.stdout).not.toContain("tok-octocat");
@@ -199,5 +202,42 @@ describe("auth multi-account CLI", () => {
     const statusPayload = JSON.parse(statusRes.stdout) as { status: string };
     expect(statusPayload.status).toBe("logged_out");
     expect(statusRes.exitCode).toBe(2);
+  });
+
+  it("makes the most recently logged-in account the default", async () => {
+    loginMock.mockResolvedValueOnce("tok-octocat");
+    await runCli(["auth", "login", "--force-session"]);
+    loginMock.mockResolvedValueOnce("tok-work");
+    await runCli(["auth", "login", "--as", "work", "--force-session"]); // work becomes default
+
+    const { getDefaultAccountId } = await import("../../src/auth/accounts.js");
+    expect(getDefaultAccountId()).toBe("work");
+
+    // Logging back into octocat (no --as) makes octocat the default again.
+    loginMock.mockResolvedValueOnce("tok-octocat");
+    const res = await runCli(["auth", "login", "--force-session", "--json"]);
+    const payload = JSON.parse(res.stdout) as { account: string; is_default: boolean };
+    expect(payload.account).toBe("octocat");
+    expect(payload.is_default).toBe(true);
+    expect(getDefaultAccountId()).toBe("octocat");
+  });
+
+  it("status human output leads with the default and isn't cluttered", async () => {
+    loginMock.mockResolvedValueOnce("tok-octocat");
+    await runCli(["auth", "login", "--force-session"]);
+    loginMock.mockResolvedValueOnce("tok-work");
+    await runCli(["auth", "login", "--as", "work", "--force-session"]); // work is default
+
+    const res = await runCli(["auth", "status"]); // human output
+    // The header names the default account so "which is active" is obvious.
+    expect(res.stdout).toContain("default: work");
+    // The default is listed first and marked.
+    const accountLines = res.stdout.split("\n").filter((l) => /\b(work|octocat)\b/.test(l) && l.trimStart().match(/^[*\s]/));
+    expect(accountLines[0]).toMatch(/\*\s+work/);
+    // Not cluttered: a login isn't repeated three times on one line as before.
+    for (const line of accountLines) {
+      const occurrences = (line.match(/work-login/g) ?? []).length;
+      expect(occurrences).toBeLessThanOrEqual(1);
+    }
   });
 });
