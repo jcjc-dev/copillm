@@ -20,6 +20,18 @@ async function runTranslator(chunks: readonly string[], fallbackModel?: string):
   return parseSse(collected.join(""));
 }
 
+async function runTranslatorRaw(upstream: Readable, fallbackModel?: string): Promise<SseEvent[]> {
+  const downstream = new PassThrough();
+  const collected: string[] = [];
+  downstream.on("data", (chunk) => {
+    collected.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+  });
+  const done = new Promise<void>((resolve) => downstream.on("end", () => resolve()));
+  await translateOpenAIStreamToAnthropic({ upstream, downstream, fallbackModel });
+  await done;
+  return parseSse(collected.join(""));
+}
+
 function parseSse(raw: string): SseEvent[] {
   const events: SseEvent[] = [];
   for (const block of raw.split("\n\n")) {
@@ -360,5 +372,163 @@ describe("streamingOpenAIToAnthropic", () => {
     upstream.end();
 
     await expect(done).resolves.toBeUndefined();
+  });
+
+  it("interleaves text and tool_use, opening a fresh text block after the tool block", async () => {
+    const events = await runTranslator([
+      dataLine({ id: "abc", model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "before" } }] }),
+      dataLine({
+        id: "abc",
+        choices: [
+          { index: 0, delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "t", arguments: "" } }] } }
+        ]
+      }),
+      dataLine({ id: "abc", choices: [{ index: 0, delta: { content: "after" } }] }),
+      dataLine({ id: "abc", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }),
+      "data: [DONE]\n\n"
+    ]);
+
+    expect(events.map((e) => e.event)).toEqual([
+      "message_start",
+      "content_block_start", // text (index 0)
+      "content_block_delta", // "before"
+      "content_block_stop", // close text 0 when the tool block opens
+      "content_block_start", // tool_use (index 1)
+      "content_block_start", // fresh text (index 2)
+      "content_block_delta", // "after"
+      "content_block_stop", // tool 1
+      "content_block_stop", // text 2
+      "message_delta",
+      "message_stop"
+    ]);
+
+    const starts = events.filter((e) => e.event === "content_block_start").map((e) => e.data as { index: number; content_block: { type: string } });
+    expect(starts).toMatchObject([
+      { index: 0, content_block: { type: "text", text: "" } },
+      { index: 1, content_block: { type: "tool_use", id: "call_1", name: "t", input: {} } },
+      { index: 2, content_block: { type: "text", text: "" } }
+    ]);
+  });
+
+  it("translates multiple distinct tool calls into separate tool_use blocks", async () => {
+    const events = await runTranslator([
+      dataLine({ id: "abc", model: "m", choices: [{ index: 0, delta: { role: "assistant" } }] }),
+      dataLine({
+        id: "abc",
+        choices: [
+          { index: 0, delta: { tool_calls: [{ index: 0, id: "call_a", type: "function", function: { name: "a", arguments: "{}" } }] } }
+        ]
+      }),
+      dataLine({
+        id: "abc",
+        choices: [
+          { index: 0, delta: { tool_calls: [{ index: 1, id: "call_b", type: "function", function: { name: "b", arguments: "{}" } }] } }
+        ]
+      }),
+      dataLine({ id: "abc", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }),
+      "data: [DONE]\n\n"
+    ]);
+
+    const toolStarts = events
+      .filter((e) => e.event === "content_block_start")
+      .map((e) => e.data as { index: number; content_block: { type: string; id?: string; name?: string } })
+      .filter((b) => b.content_block.type === "tool_use");
+    expect(toolStarts).toMatchObject([
+      { index: 0, content_block: { type: "tool_use", id: "call_a", name: "a", input: {} } },
+      { index: 1, content_block: { type: "tool_use", id: "call_b", name: "b", input: {} } }
+    ]);
+  });
+
+  it("emits a recovery sequence (message_delta, error, message_stop) when the upstream errors mid-stream", async () => {
+    async function* erroringUpstream(): AsyncGenerator<string> {
+      yield dataLine({ id: "abc", model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "partial" } }] });
+      throw new Error("kaboom upstream");
+    }
+
+    const events = await runTranslatorRaw(Readable.from(erroringUpstream()), "m");
+
+    expect(events.map((e) => e.event)).toEqual([
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "error",
+      "message_stop"
+    ]);
+    const errorEvent = events.find((e) => e.event === "error")!.data as { type: string; error: { type: string } };
+    expect(errorEvent).toMatchObject({ type: "error", error: { type: "api_error" } });
+  });
+
+  it("ignores comment, event-only, and malformed data lines", async () => {
+    const valid = JSON.stringify({ id: "abc", model: "m", choices: [{ index: 0, delta: { content: "ok" } }] });
+    const blob =
+      [
+        ": keepalive comment",
+        "event: something",
+        "garbage line without a field prefix",
+        "data: {broken json",
+        "data:   ",
+        `data: ${valid}`,
+        "data: [DONE]"
+      ].join("\n") + "\n\n";
+
+    const events = await runTranslator([blob]);
+
+    expect(events.map((e) => e.event)).toEqual([
+      "message_start",
+      "content_block_start",
+      "content_block_delta",
+      "content_block_stop",
+      "message_delta",
+      "message_stop"
+    ]);
+    const delta = events.find((e) => e.event === "content_block_delta")!.data as { delta: { text: string } };
+    expect(delta.delta.text).toBe("ok");
+  });
+
+  it("defaults usage to zero when the upstream omits a usage object", async () => {
+    const events = await runTranslator([
+      dataLine({ id: "abc", model: "m", choices: [{ index: 0, delta: { content: "hi" } }] }),
+      dataLine({ id: "abc", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+      "data: [DONE]\n\n"
+    ]);
+    const messageDelta = events.find((e) => e.event === "message_delta")!.data as {
+      usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number };
+    };
+    expect(messageDelta.usage).toEqual({ input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0 });
+  });
+
+  it("accepts a partial usage object (prompt_tokens only)", async () => {
+    const events = await runTranslator([
+      dataLine({ id: "abc", model: "m", choices: [{ index: 0, delta: { content: "hi" } }] }),
+      dataLine({ id: "abc", choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 7 } }),
+      "data: [DONE]\n\n"
+    ]);
+    const messageDelta = events.find((e) => e.event === "message_delta")!.data as {
+      usage: { input_tokens: number; output_tokens: number };
+    };
+    expect(messageDelta.usage.input_tokens).toBe(7);
+    expect(messageDelta.usage.output_tokens).toBe(0);
+  });
+
+  it("emits a ping while the upstream is idle past the keepalive interval", async () => {
+    const upstream = new PassThrough();
+    const downstream = new PassThrough();
+    const collected: string[] = [];
+    downstream.on("data", (chunk) => {
+      collected.push(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+    const done = translateOpenAIStreamToAnthropic({ upstream, downstream, fallbackModel: "m" });
+
+    upstream.write(
+      `data: ${JSON.stringify({ id: "abc", model: "m", choices: [{ index: 0, delta: { role: "assistant", content: "hi" } }] })}\n\n`
+    );
+    // Stay idle past PING_INTERVAL_MS (1000ms) so the keepalive timer fires.
+    await new Promise((r) => setTimeout(r, 1100));
+    upstream.end();
+    await done;
+
+    expect(collected.join("")).toContain("event: ping");
   });
 });
