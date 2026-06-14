@@ -2,7 +2,13 @@ import fs from "node:fs";
 import { setTimeout as defaultSleep } from "node:timers/promises";
 import { z } from "zod";
 import type { AccountType } from "../types/index.js";
-import { modelsCachePath, modelsCacheReadPath } from "../config/home.js";
+import {
+  accountModelsCachePath,
+  accountModelsCacheReadPath,
+  modelsCachePath,
+  modelsCacheReadPath
+} from "../config/home.js";
+import { assertValidAccountId } from "../config/accountId.js";
 import { writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { copilotBaseUrl } from "../config/upstream.js";
 
@@ -95,7 +101,8 @@ export function accountBaseUrl(accountType: AccountType): string {
 export async function listModels(
   accountType: AccountType,
   bearerToken: string,
-  deps?: ModelDiscoveryDeps
+  deps?: ModelDiscoveryDeps,
+  accountId?: string
 ): Promise<ModelDiscoveryResult> {
   const fetchImpl = deps?.fetchImpl ?? ((input, init) => fetch(input, init));
   const timeoutMs = deps?.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
@@ -119,7 +126,7 @@ export async function listModels(
     if (!parsed.success) {
       throw new ModelDiscoverySchemaError("Model discovery response is invalid.");
     }
-    saveModelCache(accountType, parsed.data);
+    saveModelCache(accountType, parsed.data, accountId);
     return {
       models: parsed.data,
       source: "live",
@@ -131,7 +138,7 @@ export async function listModels(
     if (!canUseCacheFallback(error)) {
       throw error;
     }
-    const cached = readModelCache(accountType);
+    const cached = readModelCache(accountType, accountId);
     if (!cached) {
       const detail = error instanceof Error ? error.message : "unknown error";
       throw new Error(`Model discovery failed and no cache snapshot is available: ${detail}`);
@@ -170,7 +177,8 @@ export async function listModelsUnion(
   accountType: AccountType,
   bearerToken: string,
   attempts = 3,
-  deps?: ModelDiscoveryDeps
+  deps?: ModelDiscoveryDeps,
+  accountId?: string
 ): Promise<ModelDiscoveryResult> {
   const sleepImpl = deps?.sleepImpl ?? ((ms) => defaultSleep(ms));
   const seen = new Map<string, CopilotModel>();
@@ -180,7 +188,7 @@ export async function listModelsUnion(
 
   for (let i = 0; i < attempts; i += 1) {
     try {
-      const result = await listModels(accountType, bearerToken, deps);
+      const result = await listModels(accountType, bearerToken, deps, accountId);
       lastResult = result;
       consecutiveFailures = 0;
       for (const model of result.models) {
@@ -346,18 +354,44 @@ function canUseCacheFallback(error: unknown): boolean {
 
 const CACHE_FALLBACK_STATUSES: ReadonlySet<number> = new Set([401, 403, 408, 409, 425, 429]);
 
-function saveModelCache(accountType: AccountType, models: CopilotModel[]): void {
+/**
+ * Resolve the model-cache file for an account. `undefined` → the shared
+ * `models.cache.json` used by the primary/legacy account and single-account
+ * installs; a string → the per-account `models.cache.<id>.json`. The caller
+ * (the daemon) decides which based on the account's storage scheme, so a
+ * default-account switch never makes two accounts share a catalog file.
+ */
+function modelsCacheWriteFile(accountId?: string): string {
+  if (accountId === undefined) {
+    return modelsCachePath();
+  }
+  assertValidAccountId(accountId);
+  return accountModelsCachePath(accountId);
+}
+
+function modelsCacheReadFile(accountId?: string): string {
+  if (accountId === undefined) {
+    return modelsCacheReadPath();
+  }
+  assertValidAccountId(accountId);
+  return accountModelsCacheReadPath(accountId);
+}
+
+function saveModelCache(accountType: AccountType, models: CopilotModel[], accountId?: string): void {
   const payload = {
     version: 1 as const,
     accountType,
     savedAtIso: new Date().toISOString(),
     models
   };
-  writeFileSecureAtomic(modelsCachePath(), JSON.stringify(payload, null, 2), 0o600);
+  writeFileSecureAtomic(modelsCacheWriteFile(accountId), JSON.stringify(payload, null, 2), 0o600);
 }
 
-function readModelCache(accountType: AccountType): null | { savedAtIso: string; models: CopilotModel[] } {
-  const filePath = modelsCacheReadPath();
+function readModelCache(
+  accountType: AccountType,
+  accountId?: string
+): null | { savedAtIso: string; models: CopilotModel[] } {
+  const filePath = modelsCacheReadFile(accountId);
   if (!fs.existsSync(filePath)) {
     return null;
   }

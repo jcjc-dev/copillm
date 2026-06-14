@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { z } from "zod";
-import { modelsCacheReadPath } from "../config/home.js";
+import { accountModelsCacheReadPath, modelsCacheReadPath } from "../config/home.js";
+import { assertValidAccountId } from "../config/accountId.js";
 
 export type AnthropicFamily = "opus" | "sonnet" | "haiku";
 
@@ -45,8 +46,14 @@ export function computeAnthropicDefaults(modelIds: readonly string[]): Anthropic
   };
 }
 
-export function readModelIdsFromCache(): string[] {
-  const file = modelsCacheReadPath();
+export function readModelIdsFromCache(accountId?: string): string[] {
+  let file: string;
+  if (accountId === undefined) {
+    file = modelsCacheReadPath();
+  } else {
+    assertValidAccountId(accountId);
+    file = accountModelsCacheReadPath(accountId);
+  }
   if (!fs.existsSync(file)) {
     return [];
   }
