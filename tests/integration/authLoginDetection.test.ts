@@ -114,4 +114,57 @@ describe("auth login — multi-account detection (regression for beta wipe bug)"
     const ids = (payload.accounts ?? []).map((a) => a.id).sort();
     expect(ids).toEqual(["alice", "work"]);
   });
+
+  it("refuses (without wiping) when the new account's login can't be verified", async () => {
+    loginMock.mockResolvedValueOnce("tok-alice");
+    await runCli(["auth", "login"]);
+
+    // Second login: identity lookup yields no login (e.g. GitHub /user throttled).
+    loginMock.mockResolvedValueOnce("tok-unknown");
+    const res = await runCli(["auth", "login", "--json"]);
+    const payload = JSON.parse(res.stdout) as { status: string; error?: string };
+    expect(res.exitCode).toBe(1);
+    expect(payload.status).toBe("error");
+    expect(payload.error).toBe("github_identity_unresolved");
+
+    // The existing account is untouched and no index was created.
+    expect(fs.existsSync(path.join(tmpHome, "accounts.json"))).toBe(false);
+    const { loadStoredCredential } = await import("../../src/auth/credentials.js");
+    expect((await loadStoredCredential())?.token).toBe("tok-alice");
+  });
+
+  it("a fresh login still works even when the login can't be verified", async () => {
+    // No existing credential → nothing to protect → store single-account.
+    loginMock.mockResolvedValueOnce("tok-unknown");
+    const res = await runCli(["auth", "login", "--json"]);
+    const payload = JSON.parse(res.stdout) as { status: string };
+    expect(payload.status).toBe("ok");
+    const { loadStoredCredential } = await import("../../src/auth/credentials.js");
+    expect((await loadStoredCredential())?.token).toBe("tok-unknown");
+  });
+
+  it("recovers from a transient GitHub /user blip via retry", async () => {
+    loginMock.mockResolvedValueOnce("tok-alice");
+    await runCli(["auth", "login"]);
+
+    // The new token resolves to "bob", but the first identity probe fails.
+    let bobProbes = 0;
+    identityMock.mockImplementation(async ({ token }) => {
+      if (token === "tok-alice") return { login: "alice", name: "Alice" };
+      if (token === "tok-bob") {
+        bobProbes += 1;
+        if (bobProbes === 1) return null; // transient failure on first probe
+        return { login: "bob", name: "Bob" };
+      }
+      return null;
+    });
+    loginMock.mockResolvedValueOnce("tok-bob");
+    await runCli(["auth", "login"]);
+
+    const res = await runCli(["auth", "status", "--json"]);
+    const payload = JSON.parse(res.stdout) as { accounts?: { id: string }[] };
+    const ids = (payload.accounts ?? []).map((a) => a.id).sort();
+    expect(ids).toEqual(["alice", "bob"]);
+    expect(bobProbes).toBeGreaterThan(1);
+  });
 });

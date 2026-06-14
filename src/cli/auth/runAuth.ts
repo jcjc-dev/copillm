@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import type { AccountType } from "../../types/index.js";
 import {
   clearStoredCredential,
@@ -38,24 +39,35 @@ export interface AuthLoginOpts {
 /**
  * Derive a friendly, path-safe account id from the GitHub login behind a token.
  * Returns null when the lookup fails or the login isn't a valid id.
+ *
+ * Multi-account routing now depends on this, so it retries a few times with a
+ * generous timeout: GitHub's `/user` can briefly throttle or lag right after a
+ * device-flow token exchange, and a single failed probe must not cause the
+ * caller to mis-identify (and overwrite) the wrong account.
  */
 async function deriveAccountId(token: string): Promise<string | null> {
-  let identity: Awaited<ReturnType<typeof inspectGithubIdentity>>;
-  try {
-    identity = await inspectGithubIdentity({ token });
-  } catch {
-    return null;
+  const attempts = 3;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let identity: Awaited<ReturnType<typeof inspectGithubIdentity>> = null;
+    try {
+      identity = await inspectGithubIdentity({ token, timeoutMs: 8_000 });
+    } catch {
+      identity = null;
+    }
+    const login = identity?.login;
+    if (login) {
+      try {
+        assertValidAccountId(login);
+        return login;
+      } catch {
+        return null;
+      }
+    }
+    if (attempt < attempts) {
+      await sleep(400 * attempt);
+    }
   }
-  const login = identity?.login;
-  if (!login) {
-    return null;
-  }
-  try {
-    assertValidAccountId(login);
-    return login;
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession: boolean }): Promise<void> {
@@ -101,48 +113,71 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
   }
 
   // ---- No name: auto-manage by the token's GitHub login -----------------
-  // Deriving the login lets `copillm auth login` recognise when a *different*
-  // GitHub account is signing in and keep both, instead of silently
-  // overwriting the previous one. A same-account re-login refreshes in place.
+  // Identify the account from its GitHub login so a second `auth login` for a
+  // DIFFERENT account is kept alongside the first instead of overwriting it.
+  // The cardinal rule: never replace an existing credential unless we have
+  // positively confirmed it's the SAME GitHub account.
   const newLogin = await deriveAccountId(token);
+  const existing = await loadStoredCredential();
+
+  if (!existing) {
+    // Nothing stored yet.
+    if (index) {
+      // An index exists but its default account has no credential — restore it.
+      const targetId = newLogin ?? index.defaultAccount;
+      const result = await addAccount({ id: targetId, accountType, token, mode: saveMode });
+      emitLoginResult(opts, result, !result.isDefault);
+      return;
+    }
+    // Fresh single-account install: store without creating an index.
+    const backend = await saveStoredCredential(token, accountType, { mode: saveMode });
+    writeCommandOutput(opts, `Login succeeded. Credentials stored via ${describeBackend(backend)}.`, {
+      status: "ok",
+      action: "login",
+      credential_backend: backend
+    });
+    return;
+  }
+
+  // A credential already exists. We must know which GitHub account just signed
+  // in before we touch anything, or we risk clobbering a different account.
+  if (!newLogin) {
+    writeCommandOutput(
+      opts,
+      "Login failed: couldn't verify which GitHub account you signed in as (the GitHub user lookup didn't succeed). " +
+        "Your existing credentials were left untouched. Re-run `copillm auth login`, or name this account explicitly with `copillm auth login --as <name>`.",
+      { status: "error", action: "login", error: "github_identity_unresolved" }
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   if (index) {
-    // Add the new login as its own account (or refresh it if already known);
-    // when the login can't be determined, refresh the default account.
-    const targetId = newLogin ?? index.defaultAccount;
-    const wasKnown = findAccount(targetId) !== null;
-    const result = await addAccount({ id: targetId, accountType, token, mode: saveMode });
+    // Add the new login as its own account, or refresh it in place if known.
+    const wasKnown = findAccount(newLogin) !== null;
+    const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
     emitLoginResult(opts, result, !wasKnown && !result.isDefault);
     return;
   }
 
-  // No accounts index yet. If a *different* GitHub account is signing in, move
-  // to multi-account instead of overwriting the existing single credential.
-  if (newLogin) {
-    const existing = await loadStoredCredential();
-    if (existing) {
-      const existingLogin = await deriveAccountId(existing.token);
-      if (existingLogin !== newLogin) {
-        // Different (or undeterminable) account → preserve the prior login as
-        // the default and add the new one alongside it.
-        registerExistingCredentialAsDefault(existingLogin ?? "default", existing.accountType);
-        const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
-        emitLoginResult(opts, result, !result.isDefault);
-        return;
-      }
-      // Same account → fall through to an in-place single-account refresh.
-    }
+  // No index yet. Compare against the existing single account.
+  const existingLogin = await deriveAccountId(existing.token);
+  if (existingLogin === newLogin) {
+    // Confirmed the SAME account → refresh in place, no index created.
+    const backend = await saveStoredCredential(token, accountType, { mode: saveMode });
+    writeCommandOutput(opts, `Login succeeded. Credentials stored via ${describeBackend(backend)}.`, {
+      status: "ok",
+      action: "login",
+      credential_backend: backend
+    });
+    return;
   }
 
-  // Single-account login: no prior credential, the same account re-logging in,
-  // or an undeterminable login. Preserve the historical behaviour exactly —
-  // legacy storage, no accounts index created.
-  const backend = await saveStoredCredential(token, accountType, { mode: saveMode });
-  writeCommandOutput(opts, `Login succeeded. Credentials stored via ${describeBackend(backend)}.`, {
-    status: "ok",
-    action: "login",
-    credential_backend: backend
-  });
+  // A different (or unverifiable) prior account → transition to multi-account,
+  // preserving the prior login as the default and adding the new one.
+  registerExistingCredentialAsDefault(existingLogin ?? "default", existing.accountType);
+  const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode });
+  emitLoginResult(opts, result, !result.isDefault);
 }
 
 function emitLoginResult(opts: AuthLoginOpts, result: AddAccountResult, hintSwitch: boolean): void {
