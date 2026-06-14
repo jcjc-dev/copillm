@@ -21,7 +21,20 @@ interface AnthropicToolResultBlock {
   is_error?: boolean;
 }
 
-type AnthropicMessageBlock = AnthropicTextBlock | AnthropicToolUseBlock | AnthropicToolResultBlock;
+type AnthropicImageSource =
+  | { type: "base64"; media_type: string; data: string }
+  | { type: "url"; url: string };
+
+interface AnthropicImageBlock {
+  type: "image";
+  source: AnthropicImageSource;
+}
+
+type AnthropicMessageBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicToolUseBlock
+  | AnthropicToolResultBlock;
 
 interface AnthropicUserMessage {
   role: "user" | "assistant";
@@ -46,6 +59,8 @@ interface AnthropicRequest {
   messages: AnthropicUserMessage[];
   max_tokens?: number;
   temperature?: number;
+  top_p?: number;
+  stop_sequences?: string[];
   stream?: boolean;
   tools?: AnthropicToolDefinition[];
   tool_choice?: AnthropicToolChoice;
@@ -106,6 +121,14 @@ export function anthropicToOpenAI(body: unknown): Record<string, unknown> {
 
   if (request.temperature !== undefined) {
     translated.temperature = request.temperature;
+  }
+  if (request.top_p !== undefined) {
+    translated.top_p = request.top_p;
+  }
+  if (request.stop_sequences !== undefined) {
+    // Anthropic `stop_sequences` (array of strings) maps 1:1 onto OpenAI's
+    // `stop` field, which Copilot's chat/completions endpoint accepts.
+    translated.stop = request.stop_sequences;
   }
   if (request.stream !== undefined) {
     translated.stream = request.stream;
@@ -200,6 +223,12 @@ function parseAnthropicRequest(body: unknown): AnthropicRequest {
   }
   if (body.temperature !== undefined) {
     parsed.temperature = body.temperature as number;
+  }
+  if (body.top_p !== undefined) {
+    parsed.top_p = body.top_p as number;
+  }
+  if (body.stop_sequences !== undefined) {
+    parsed.stop_sequences = body.stop_sequences as string[];
   }
   if (body.stream !== undefined) {
     parsed.stream = body.stream as boolean;
@@ -312,14 +341,18 @@ function translateAssistantMessageBlocks(blocks: AnthropicMessageBlock[]): Array
   ];
 }
 
+type OpenAIUserContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 function translateUserMessageBlocks(blocks: AnthropicMessageBlock[]): Array<Record<string, unknown>> {
   const translated: Array<Record<string, unknown>> = [];
-  const textSegments: string[] = [];
+  let parts: OpenAIUserContentPart[] = [];
 
-  const flushText = (): void => {
-    if (textSegments.length > 0) {
-      translated.push({ role: "user", content: textSegments.join("\n") });
-      textSegments.length = 0;
+  const flushParts = (): void => {
+    if (parts.length > 0) {
+      translated.push({ role: "user", content: collapseUserParts(parts) });
+      parts = [];
     }
   };
 
@@ -332,7 +365,12 @@ function translateUserMessageBlocks(blocks: AnthropicMessageBlock[]): Array<Reco
       if (typeof block.text !== "string") {
         throw new ProtocolTranslationError("invalid_text_block", "Anthropic text block must include string text.");
       }
-      textSegments.push(block.text);
+      parts.push({ type: "text", text: block.text });
+      continue;
+    }
+
+    if (block.type === "image") {
+      parts.push({ type: "image_url", image_url: { url: translateImageSource(block.source) } });
       continue;
     }
 
@@ -340,7 +378,7 @@ function translateUserMessageBlocks(blocks: AnthropicMessageBlock[]): Array<Reco
       if (typeof block.tool_use_id !== "string" || block.tool_use_id.length === 0) {
         throw new ProtocolTranslationError("invalid_tool_result", "Anthropic tool_result requires non-empty tool_use_id.");
       }
-      flushText();
+      flushParts();
       const rawContent = translateToolResultContent(block.content);
       const content = block.is_error ? `[tool_error] ${rawContent}` : rawContent;
       translated.push({
@@ -361,13 +399,56 @@ function translateUserMessageBlocks(blocks: AnthropicMessageBlock[]): Array<Reco
     throw new ProtocolTranslationError("unsupported_block", `Unsupported Anthropic user block type: ${block.type}.`);
   }
 
-  flushText();
+  flushParts();
 
   if (translated.length === 0) {
     translated.push({ role: "user", content: "" });
   }
 
   return translated;
+}
+
+/**
+ * Collapse the accumulated content parts into an OpenAI message `content`.
+ * Text-only messages stay a plain newline-joined string (the historical shape
+ * every text request produced); once an image is present we must emit the
+ * OpenAI multi-part content array so the `image_url` parts survive to upstream.
+ */
+function collapseUserParts(parts: OpenAIUserContentPart[]): string | OpenAIUserContentPart[] {
+  const hasImage = parts.some((part) => part.type === "image_url");
+  if (!hasImage) {
+    return parts.map((part) => (part.type === "text" ? part.text : "")).join("\n");
+  }
+  return parts;
+}
+
+/**
+ * Translate an Anthropic image `source` into an OpenAI `image_url.url`. A
+ * base64 source becomes a `data:` URL; a url source passes its URL through.
+ * Copilot's chat/completions endpoint accepts both for vision-capable models;
+ * sending an image to a non-vision model surfaces as an upstream error, which
+ * is the correct place for that signal — translation stays capability-agnostic.
+ */
+function translateImageSource(source: unknown): string {
+  if (!isObject(source) || typeof source.type !== "string") {
+    throw new ProtocolTranslationError("invalid_image_source", "Anthropic image block requires a source object with a type.");
+  }
+  if (source.type === "base64") {
+    if (typeof source.media_type !== "string" || source.media_type.length === 0) {
+      throw new ProtocolTranslationError("invalid_image_source", "Anthropic base64 image source requires a media_type.");
+    }
+    if (typeof source.data !== "string" || source.data.length === 0) {
+      throw new ProtocolTranslationError("invalid_image_source", "Anthropic base64 image source requires data.");
+    }
+    return `data:${source.media_type};base64,${source.data}`;
+  }
+  if (source.type === "url") {
+    if (typeof source.url !== "string" || source.url.length === 0) {
+      throw new ProtocolTranslationError("invalid_image_source", "Anthropic url image source requires a non-empty url.");
+    }
+    return source.url;
+  }
+  throw new ProtocolTranslationError("unsupported_image_source", `Unsupported Anthropic image source type: ${String(source.type)}.`);
 }
 
 function translateToolResultContent(content: AnthropicToolResultBlock["content"]): string {

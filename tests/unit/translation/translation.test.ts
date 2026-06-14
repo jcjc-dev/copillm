@@ -224,3 +224,165 @@ describe("translation", () => {
     expect(stripOneMillionAlias("")).toBe("");
   });
 });
+
+describe("translation: image content blocks", () => {
+  it("maps a base64 image block to an OpenAI image_url data URL (multi-part content)", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is in this image?" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAABBBB" } }
+          ]
+        }
+      ]
+    });
+
+    expect(request).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is in this image?" },
+            { type: "image_url", image_url: { url: "data:image/png;base64,AAAABBBB" } }
+          ]
+        }
+      ]
+    });
+  });
+
+  it("maps a url image source to an OpenAI image_url url", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image", source: { type: "url", url: "https://example.test/cat.png" } }]
+        }
+      ]
+    });
+
+    expect(request).toMatchObject({
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image_url", image_url: { url: "https://example.test/cat.png" } }]
+        }
+      ]
+    });
+  });
+
+  it("flushes a user image message before a following tool_result message", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "ZZZ" } },
+            { type: "tool_result", tool_use_id: "toolu_9", content: "done" }
+          ]
+        }
+      ]
+    });
+
+    expect(request.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "image_url", image_url: { url: "data:image/jpeg;base64,ZZZ" } }]
+      },
+      { role: "tool", tool_call_id: "toolu_9", content: "done" }
+    ]);
+  });
+
+  it("keeps text-only multi-block content as a joined string (no array regression)", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "line one" },
+            { type: "text", text: "line two" }
+          ]
+        }
+      ]
+    });
+
+    expect(request.messages).toEqual([{ role: "user", content: "line one\nline two" }]);
+  });
+
+  it("rejects a base64 image source missing media_type", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [
+          { role: "user", content: [{ type: "image", source: { type: "base64", data: "AAAA" } }] }
+        ]
+      })
+    ).toThrowError(ProtocolTranslationError);
+  });
+
+  it("rejects a base64 image source missing data", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [
+          { role: "user", content: [{ type: "image", source: { type: "base64", media_type: "image/png" } }] }
+        ]
+      })
+    ).toThrowError(ProtocolTranslationError);
+  });
+
+  it("rejects a url image source missing url", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "url" } }] }]
+      })
+    ).toThrowError(ProtocolTranslationError);
+  });
+
+  it("rejects an unsupported image source type", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [{ role: "user", content: [{ type: "image", source: { type: "file" } }] }]
+      })
+    ).toThrowError(ProtocolTranslationError);
+  });
+
+  it("rejects an image block with no source object", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [{ role: "user", content: [{ type: "image" }] }]
+      })
+    ).toThrowError(ProtocolTranslationError);
+  });
+});
+
+describe("translation: sampling parameter passthrough", () => {
+  it("passes top_p and stop_sequences through to the OpenAI request", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [{ role: "user", content: "hi" }],
+      top_p: 0.9,
+      stop_sequences: ["STOP", "\n\nHuman:"]
+    });
+
+    expect(request).toMatchObject({ top_p: 0.9, stop: ["STOP", "\n\nHuman:"] });
+  });
+
+  it("omits top_p and stop when the Anthropic request does not set them", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [{ role: "user", content: "hi" }]
+    });
+
+    expect(request.top_p).toBeUndefined();
+    expect(request.stop).toBeUndefined();
+  });
+});
