@@ -12,13 +12,13 @@ export function displayHomePath(p: string): string {
 export function formatStartBanner(input: {
   port: number;
   pid: number;
-  mode: "foreground" | "detached" | "already_running";
+  mode: "foreground" | "detached" | "already_running" | "restarted";
   debug: boolean;
   debugLogPath: null | string;
   codex: null | Awaited<ReturnType<typeof generateCodexHome>>;
   pi: PiInitResult | null;
 }): string {
-  const verb = input.mode === "foreground" ? "listening on" : "running on";
+  const verb = input.mode === "foreground" ? "listening on" : input.mode === "restarted" ? "restarted on" : "running on";
   const lines: string[] = [];
   const debugSuffix = input.debug ? " [debug]" : "";
   const modeSuffix = input.mode === "already_running" ? " (already running)" : "";

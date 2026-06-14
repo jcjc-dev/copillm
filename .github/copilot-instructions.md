@@ -53,7 +53,7 @@ src/
     index.ts                   # commander entry: registers every command + global flags (--debug, --no-update-notifier)
     commands/
       auth.ts                  # auth login | logout | status  (+ deprecated top-level login/logout)
-      daemon.ts                # start | stop | status | health  (+ internal `daemon`)
+      daemon.ts                # start | restart | stop | status | health  (+ internal `daemon`)
       models.ts                # models list | select
       env.ts                   # env <agent> — print env vars to launch codex/claude/pi against copillm
       agents/                  # codex.ts claude.ts pi.ts copilot.ts shared.ts — the agent launchers
