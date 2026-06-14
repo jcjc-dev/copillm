@@ -1,12 +1,41 @@
 import type { IncomingMessage } from "node:http";
 import { stripOneMillionAlias } from "../../translation/openaiAnthropic.js";
 import { isValidAccountId } from "../../config/accountId.js";
-import { JsonRequestParseError } from "../errors.js";
+import { JsonRequestParseError, RequestBodyTooLargeError } from "../errors.js";
 
-export async function readJson(req: IncomingMessage): Promise<unknown> {
+/**
+ * Default cap on a single request body. The daemon buffers the whole body in
+ * memory before forwarding, so an unbounded read is an OOM vector even on a
+ * loopback-only socket (a runaway agent or a pathological context). 32 MiB is
+ * far above any real chat/completions payload while still bounding memory.
+ * Override with `COPILLM_MAX_REQUEST_BYTES` (a positive integer count of bytes).
+ */
+export const DEFAULT_MAX_REQUEST_BYTES = 32 * 1024 * 1024;
+
+export function maxRequestBytes(): number {
+  const raw = process.env.COPILLM_MAX_REQUEST_BYTES;
+  if (raw === undefined || raw.trim().length === 0) {
+    return DEFAULT_MAX_REQUEST_BYTES;
+  }
+  const parsed = Number(raw.trim());
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return DEFAULT_MAX_REQUEST_BYTES;
+  }
+  return parsed;
+}
+
+export async function readJson(req: IncomingMessage, maxBytes: number = maxRequestBytes()): Promise<unknown> {
   const chunks: Buffer[] = [];
+  let total = 0;
   for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    const buffer = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    total += buffer.length;
+    if (total > maxBytes) {
+      // Stop accumulating immediately so an oversized body can't be buffered
+      // into memory; throwing ends the async iteration and tears down the read.
+      throw new RequestBodyTooLargeError(maxBytes);
+    }
+    chunks.push(buffer);
   }
   if (chunks.length === 0) {
     return {};

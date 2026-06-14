@@ -16,7 +16,8 @@ import {
 } from "./requestLifecycle.js";
 import {
   InvalidRequestShapeError,
-  JsonRequestParseError
+  JsonRequestParseError,
+  RequestBodyTooLargeError
 } from "./errors.js";
 import { ProtocolTranslationError } from "../translation/openaiAnthropic.js";
 import { handleHealthz, handleLivez } from "./routes/health.js";
@@ -153,6 +154,10 @@ export async function startProxyServer(input: {
     } catch (error) {
       if (error instanceof JsonRequestParseError) {
         safeSendJson(res, 400, { error: "invalid_request_json", detail: error.message });
+        return;
+      }
+      if (error instanceof RequestBodyTooLargeError) {
+        safeSendJson(res, 413, { error: "payload_too_large", detail: error.message });
         return;
       }
       if (error instanceof InvalidRequestShapeError) {

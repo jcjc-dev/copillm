@@ -20,6 +20,13 @@ export class InvalidRequestShapeError extends Error {
   }
 }
 
+export class RequestBodyTooLargeError extends Error {
+  public constructor(public readonly maxBytes: number) {
+    super(`Request body exceeds the maximum allowed size of ${maxBytes} bytes.`);
+    this.name = "RequestBodyTooLargeError";
+  }
+}
+
 export interface UpstreamErrorInfo {
   contentType: string | null;
   code: string | null;
