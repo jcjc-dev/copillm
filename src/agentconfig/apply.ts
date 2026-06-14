@@ -1,4 +1,4 @@
-import { writeFileSecureAtomic } from "../config/fsSecurity.js";
+import { writeFilesSecureAtomic } from "../config/fsSecurity.js";
 import { loadAgentConfig, type LoadResult } from "./load.js";
 import {
   planRender,
@@ -31,13 +31,15 @@ export function applyAgentConfig(opts: ApplyOptions): ApplyResult {
 
   const rendered = planRender(opts, load);
 
-  // Phase 2: write. By this point all validation passed and the renderer
-  // produced complete file bodies — failures here are IO errors, not user
-  // input problems.
+  // Phase 2: write. All validation passed and the renderer produced complete
+  // file bodies, so failures here are IO errors. Back up any user-edited
+  // targets first, then commit every file as one two-phase atomic batch: each
+  // file is staged to a temp path before any is renamed into place, so an IO
+  // failure mid-fan-out leaves nothing committed rather than a half-updated set.
   for (const write of rendered.writes) {
     backupIfMismatch(write.path, write.content);
-    writeFileSecureAtomic(write.path, write.content, write.mode);
   }
+  writeFilesSecureAtomic(rendered.writes);
 
   return {
     active: load.active,
