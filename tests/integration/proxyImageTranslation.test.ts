@@ -89,4 +89,67 @@ describe("proxy: Anthropic image translation reaches upstream", () => {
     const body = (await response.json()) as { type?: string; role?: string; content?: unknown };
     expect(body).toMatchObject({ type: "message", role: "assistant" });
   });
+
+  it("forwards a tool_result whose content array contains an image block (does not 400)", async () => {
+    // Regression: Claude Code (and MCP servers it drives) ships
+    // tool_result.content arrays containing image blocks — e.g. a screenshot
+    // tool, or a file-read tool that returns an image. Anthropic's spec
+    // permits this; we used to reject the entire request with
+    // 400 invalid_request_shape "Anthropic tool_result content only supports
+    // text blocks." The translator now degrades the image to a placeholder
+    // string in the tool message content so the request reaches upstream.
+    if (!harness) throw new Error("harness not started");
+
+    let upstreamBody: Record<string, unknown> | null = null;
+    harness.setHandlers({
+      onChatCompletions: async (req, res) => {
+        upstreamBody = await readJsonBody(req);
+        res.statusCode = 200;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(cannedOpenAIReply()));
+      }
+    });
+
+    const response = await fetch(`${harness.baseUrl}/anthropic/v1/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer copillm-test" },
+      body: JSON.stringify({
+        model: "claude-test-sonnet",
+        max_tokens: 64,
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              { type: "tool_use", id: "toolu_shot", name: "screenshot", input: {} }
+            ]
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_shot",
+                content: [
+                  { type: "text", text: "here is the screenshot:" },
+                  { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } }
+                ]
+              }
+            ]
+          }
+        ]
+      })
+    });
+
+    expect(response.status).toBe(200);
+
+    const messages = (upstreamBody as { messages?: unknown } | null)?.messages as
+      | Array<{ role: string; tool_call_id?: string; content: unknown }>
+      | undefined;
+    const toolMessage = messages?.find((m) => m.role === "tool");
+    expect(toolMessage).toMatchObject({
+      role: "tool",
+      tool_call_id: "toolu_shot",
+      content: "here is the screenshot:\n[image: image/png]"
+    });
+  });
 });
