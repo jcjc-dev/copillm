@@ -451,14 +451,79 @@ function translateImageSource(source: unknown): string {
   throw new ProtocolTranslationError("unsupported_image_source", `Unsupported Anthropic image source type: ${String(source.type)}.`);
 }
 
+/**
+ * Translate Anthropic `tool_result.content` into the string that goes into the
+ * OpenAI `tool` message's `content` field.
+ *
+ * Anthropic permits a `tool_result.content` array to contain `text` blocks
+ * *and* `image` blocks (and tolerates unknown future block types), but the
+ * OpenAI chat-completions `tool` role only accepts string content. Rather
+ * than reject the whole request — which historically surfaced to Claude Code
+ * as the cryptic `invalid_request_shape: Anthropic tool_result content only
+ * supports text blocks.` 400 whenever a tool (e.g. a screenshot MCP, an image
+ * read) returned an image — we degrade gracefully:
+ *
+ *   - text blocks  → extracted verbatim
+ *   - image blocks → a `[image: <media_type_or_url>]` placeholder so the
+ *                    model at least sees that the tool returned an image
+ *   - other types  → a `[unsupported tool_result content block: type=X]`
+ *                    placeholder
+ *
+ * Full image pass-through (forwarding the image bytes to the model as a
+ * follow-up multi-part user message) is a deliberate non-goal for this
+ * function — it would change the request structure and the upstream contract
+ * for `tool` messages. We can revisit if/when there is a confirmed need.
+ *
+ * Malformed `text` blocks (missing `.text`) still throw — that is a real
+ * client bug, not a content shape we should silently invent text for.
+ */
 function translateToolResultContent(content: AnthropicToolResultBlock["content"]): string {
   if (typeof content === "string") {
     return content;
   }
   if (!Array.isArray(content)) {
-    throw new ProtocolTranslationError("invalid_tool_result_content", "Anthropic tool_result content must be string or text blocks.");
+    throw new ProtocolTranslationError(
+      "invalid_tool_result_content",
+      "Anthropic tool_result content must be a string or an array of content blocks."
+    );
   }
-  return joinTextBlocks(content, "Anthropic tool_result content");
+  return content.map(stringifyToolResultContentBlock).join("\n");
+}
+
+function stringifyToolResultContentBlock(block: unknown): string {
+  if (!isObject(block) || typeof block.type !== "string") {
+    throw new ProtocolTranslationError(
+      "invalid_tool_result_content",
+      "Anthropic tool_result content blocks must be objects with a string type."
+    );
+  }
+  if (block.type === "text") {
+    if (typeof block.text !== "string") {
+      throw new ProtocolTranslationError(
+        "invalid_text_block",
+        "Anthropic text block must include string text."
+      );
+    }
+    return block.text;
+  }
+  if (block.type === "image") {
+    const descriptor = describeImageSource(block.source);
+    return descriptor ? `[image: ${descriptor}]` : "[image]";
+  }
+  return `[unsupported tool_result content block: type=${block.type}]`;
+}
+
+function describeImageSource(source: unknown): string | null {
+  if (!isObject(source) || typeof source.type !== "string") {
+    return null;
+  }
+  if (source.type === "base64" && typeof source.media_type === "string" && source.media_type.length > 0) {
+    return source.media_type;
+  }
+  if (source.type === "url" && typeof source.url === "string" && source.url.length > 0) {
+    return source.url;
+  }
+  return null;
 }
 
 function translateToolDefinition(tool: AnthropicToolDefinition): Record<string, unknown> {

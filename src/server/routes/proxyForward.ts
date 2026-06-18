@@ -4,7 +4,8 @@ import type { AppConfig } from "../../types/index.js";
 import { resolveModelId } from "../../models/discovery.js";
 import { CopilotTokenManagerError } from "../../auth/copilotToken.js";
 import {
-  anthropicToOpenAI
+  anthropicToOpenAI,
+  ProtocolTranslationError
 } from "../../translation/openaiAnthropic.js";
 import {
   writeAnthropicPrelude,
@@ -38,6 +39,9 @@ function translateRequestBody(routeKind: RequestRoute["kind"], body: unknown): u
   try {
     return anthropicToOpenAI(body);
   } catch (error) {
+    if (error instanceof ProtocolTranslationError) {
+      throw error;
+    }
     if (error instanceof Error) {
       throw new InvalidRequestShapeError(error.message);
     }

@@ -92,6 +92,189 @@ describe("translation", () => {
     });
   });
 
+  it("translates an image block inside tool_result content to a placeholder string", () => {
+    // Regression for https://github.com/jcjc-dev/copillm/issues/... — Claude Code
+    // ships tool_result.content arrays that include image blocks (e.g. when a
+    // tool reads an image file or a screenshot MCP returns one). Anthropic's
+    // spec allows that shape; we used to reject the entire request with
+    // 400 invalid_request_shape "Anthropic tool_result content only supports
+    // text blocks.". We now degrade to a placeholder so the request goes
+    // through and the model at least sees that the tool returned an image.
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_img",
+              content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } }]
+            }
+          ]
+        }
+      ]
+    });
+    expect(request.messages).toEqual([
+      { role: "tool", tool_call_id: "toolu_img", content: "[image: image/png]" }
+    ]);
+  });
+
+  it("joins mixed text and image blocks inside tool_result content", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_mix",
+              content: [
+                { type: "text", text: "before" },
+                { type: "image", source: { type: "url", url: "https://example.test/cat.png" } },
+                { type: "text", text: "after" }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+    expect(request.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "toolu_mix",
+        content: "before\n[image: https://example.test/cat.png]\nafter"
+      }
+    ]);
+  });
+
+  it("uses a bare [image] placeholder when the image source descriptor is missing", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_img2",
+              // An unusual but spec-permissible source shape we can't summarise.
+              content: [{ type: "image", source: { type: "file", file_id: "file_abc" } } as unknown as { type: "image"; source: { type: "url"; url: string } }]
+            }
+          ]
+        }
+      ]
+    });
+    expect(request.messages).toEqual([
+      { role: "tool", tool_call_id: "toolu_img2", content: "[image]" }
+    ]);
+  });
+
+  it("tolerates unknown tool_result content block types with a placeholder", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_unknown",
+              content: [
+                { type: "text", text: "log line" },
+                // Some hypothetical future block type — must not 400 the request.
+                { type: "document_ref", ref: "doc-1" } as unknown as { type: "text"; text: string }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+    expect(request.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "toolu_unknown",
+        content: "log line\n[unsupported tool_result content block: type=document_ref]"
+      }
+    ]);
+  });
+
+  it("still prefixes is_error when tool_result content contains an image", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-sonnet",
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_err_img",
+              is_error: true,
+              content: [
+                { type: "text", text: "failed" },
+                { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "ZZZ" } }
+              ]
+            }
+          ]
+        }
+      ]
+    });
+    expect(request.messages).toEqual([
+      {
+        role: "tool",
+        tool_call_id: "toolu_err_img",
+        content: "[tool_error] failed\n[image: image/jpeg]"
+      }
+    ]);
+  });
+
+  it("still rejects malformed text blocks inside tool_result content", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "toolu_bad",
+                content: [{ type: "text" } as unknown as { type: "text"; text: string }]
+              }
+            ]
+          }
+        ]
+      })
+    ).toThrow(
+      expect.objectContaining({
+        name: "ProtocolTranslationError",
+        code: "invalid_text_block"
+      })
+    );
+  });
+
+  it("still rejects non-text blocks inside a system prompt (joinTextBlocks regression guard)", () => {
+    expect(() =>
+      anthropicToOpenAI({
+        model: "claude-test-sonnet",
+        system: [
+          { type: "text", text: "be concise" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } } as unknown as {
+            type: "text";
+            text: string;
+          }
+        ],
+        messages: [{ role: "user", content: "hi" }]
+      })
+    ).toThrow(
+      expect.objectContaining({
+        name: "ProtocolTranslationError",
+        code: "unsupported_block"
+      })
+    );
+  });
+
   it("maps openai response to anthropic message with tool use and stable id", () => {
     const mapped = openAIToAnthropic({
       id: "chatcmpl-abc",
