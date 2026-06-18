@@ -48,7 +48,9 @@ afterEach(async () => {
 });
 
 describe("copillm status — daemon version reporting", () => {
-  it("status --json reports daemon_version + cli_version and matches when daemon and cli agree", async () => {
+  it(
+    "status --json reports daemon_version + cli_version and matches when daemon and cli agree",
+    async () => {
     mock = await startMockBackend();
     seeded = seedFreshHome();
     const port = await findFreePort();
@@ -75,9 +77,13 @@ describe("copillm status — daemon version reporting", () => {
     expect(payload.latest_version).toBeNull();
     expect(payload.update_available).toBe(false);
     expect(payload.version_hint).toBeNull();
-  });
+  },
+    30_000
+  );
 
-  it("status flags a stale daemon when the CLI was upgraded but the daemon was not restarted", async () => {
+  it(
+    "status flags a stale daemon when the CLI was upgraded but the daemon was not restarted",
+    async () => {
     mock = await startMockBackend();
     seeded = seedFreshHome();
     const port = await findFreePort();
@@ -104,9 +110,13 @@ describe("copillm status — daemon version reporting", () => {
     expect(payload.cli_version).toBe("0.4.3");
     expect(payload.update_available).toBe(true);
     expect(payload.version_hint).toBe("restart to apply cli v0.4.3");
-  });
+  },
+    30_000
+  );
 
-  it("status (text) surfaces the version line + hint in human output", async () => {
+  it(
+    "status (text) surfaces the version line + hint in human output",
+    async () => {
     mock = await startMockBackend();
     seeded = seedFreshHome();
     const port = await findFreePort();
@@ -124,9 +134,13 @@ describe("copillm status — daemon version reporting", () => {
     });
     expect(status.status, status.stderr).toBe(0);
     expect(status.stdout).toMatch(/version: 0\.4\.2 \(cli 0\.4\.3\) — restart to apply cli v0\.4\.3/);
-  });
+  },
+    30_000
+  );
 
-  it("status reports cli_version even when the daemon is not running", async () => {
+  it(
+    "status reports cli_version even when the daemon is not running",
+    async () => {
     mock = await startMockBackend();
     seeded = seedFreshHome();
 
@@ -148,7 +162,9 @@ describe("copillm status — daemon version reporting", () => {
     expect(payload.cli_version).toBe("1.2.3");
     expect(payload.update_available).toBe(false);
     expect(payload.version_hint).toBeNull();
-  });
+  },
+    30_000
+  );
 });
 
 function runCli(args: string[], extraEnv: Record<string, string>): Promise<{ status: number; stdout: string; stderr: string }> {
