@@ -190,4 +190,38 @@ describe("probeHealth — structured failure on transport error (Fix 8 regressio
     expect(result.error).toBe("token_exchange_failed");
     expect(result.bearerTtlSeconds).toBeNull();
   });
+
+  it("parses the `version` field from /healthz when the daemon includes it", async () => {
+    handler = (_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ status: "ok", bearer_ttl_seconds: 60, version: "0.4.3" }));
+    };
+    const result = await probeHealth(port, { attempts: 1 });
+    expect(result.version).toBe("0.4.3");
+  });
+
+  it("falls back to `version: null` when an older daemon omits the field", async () => {
+    handler = (_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ status: "ok", bearer_ttl_seconds: 60 }));
+    };
+    const result = await probeHealth(port, { attempts: 1 });
+    expect(result.version).toBeNull();
+  });
+
+  it("falls back to `version: null` when the field is the wrong type", async () => {
+    handler = (_req, res) => {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ status: "ok", bearer_ttl_seconds: 60, version: 12345 }));
+    };
+    const result = await probeHealth(port, { attempts: 1 });
+    expect(result.version).toBeNull();
+  });
+
+  it("falls back to `version: null` on transport failure", async () => {
+    await new Promise<void>((resolve) => server!.close(() => resolve()));
+    server = null;
+    const result = await probeHealth(port, { attempts: 1, sleepImpl: async () => {} });
+    expect(result.version).toBeNull();
+  });
 });

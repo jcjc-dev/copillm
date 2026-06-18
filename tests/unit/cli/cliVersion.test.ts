@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { fallbackPackageInfo } from "../../../src/cli/packageInfo.js";
+import { fallbackPackageInfo } from "../../../src/config/packageInfo.js";
 
 // Regression guard for the bug where program.version was hardcoded to "0.1.0"
 // and silently drifted from package.json across releases.

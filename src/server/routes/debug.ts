@@ -16,6 +16,7 @@ export async function handleDebug(
     githubToken?: string;
     port: number;
     accounts?: { defaultAccountId: string | null; activeAccountIds: string[] };
+    packageVersion?: string;
   }
 ): Promise<void> {
   const bearerTtlSeconds = input.tokenManager.expiresInSeconds();
@@ -50,6 +51,7 @@ export async function handleDebug(
       port: input.port,
       pid: process.pid,
       node_version: process.version,
+      version: input.packageVersion ?? null,
       started_at_iso: DAEMON_STARTED_AT_ISO,
       uptime_seconds: uptimeSeconds,
       account_type: input.config.accountType,

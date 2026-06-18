@@ -104,6 +104,13 @@ export interface HealthProbeResult {
   statusCode: null | number;
   status: null | string;
   error: null | string;
+  /**
+   * Version of the running daemon process, as reported by `/healthz`.
+   * `null` when the daemon is older than the field's introduction (in which
+   * case status falls back to "version: unknown") or when the response is
+   * malformed.
+   */
+  version: null | string;
 }
 
 export async function probeHealth(port: number, options?: ProbeRetryOptions): Promise<HealthProbeResult> {
@@ -114,6 +121,7 @@ export async function probeHealth(port: number, options?: ProbeRetryOptions): Pr
         bearer_ttl_seconds?: unknown;
         status?: unknown;
         error?: unknown;
+        version?: unknown;
       };
       return {
         ok: {
@@ -121,7 +129,8 @@ export async function probeHealth(port: number, options?: ProbeRetryOptions): Pr
           statusCode: response.status,
           status: typeof payload.status === "string" ? payload.status : null,
           error: typeof payload.error === "string" ? payload.error : null,
-          bearerTtlSeconds: response.ok && typeof payload.bearer_ttl_seconds === "number" ? payload.bearer_ttl_seconds : null
+          bearerTtlSeconds: response.ok && typeof payload.bearer_ttl_seconds === "number" ? payload.bearer_ttl_seconds : null,
+          version: typeof payload.version === "string" && payload.version.length > 0 ? payload.version : null
         },
         failed: false as const
       };
@@ -130,7 +139,7 @@ export async function probeHealth(port: number, options?: ProbeRetryOptions): Pr
     }
   }, options);
   return result.failed
-    ? { ok: false, bearerTtlSeconds: null, statusCode: null, status: null, error: "health_probe_failed" }
+    ? { ok: false, bearerTtlSeconds: null, statusCode: null, status: null, error: "health_probe_failed", version: null }
     : result.ok;
 }
 

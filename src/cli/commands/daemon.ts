@@ -21,7 +21,8 @@ import { writeCommandOutput, writeHealthOutput } from "../shared/output.js";
 import { spawnDetachedDaemon } from "../daemon/spawnDetached.js";
 import { resolveRestartDecision, type DaemonLockState } from "../daemon/restart.js";
 import { selfUpdateToLatest, describeSelfUpdate, type SelfUpdateResult } from "../daemon/selfUpdate.js";
-import { getPackageInfo } from "../packageInfo.js";
+import { computeVersionStatus, type VersionStatusFields } from "../daemon/versionStatus.js";
+import { getPackageInfo } from "../../config/packageInfo.js";
 
 export function register(program: Command): void {
   program
@@ -286,11 +287,16 @@ export function register(program: Command): void {
     .command("status")
     .description("Show daemon status")
     .option("--json", "JSON output")
-    .action(async (opts: { json?: boolean }) => {
+    .option(
+      "--no-registry-check",
+      "Skip the npm registry lookup for latest-version comparison (also via NO_UPDATE_NOTIFIER / COPILLM_UPDATE_CHECK=0)"
+    )
+    .action(async (opts: { json?: boolean; registryCheck?: boolean }) => {
       const config = loadConfig();
       const lockState = inspectLock();
       const checkedAtIso = new Date().toISOString();
       const uptimeSeconds = lockState.state === "running" ? computeUptimeSeconds(lockState.lock.started_at_iso) : null;
+      const cliPackageInfo = getPackageInfo();
 
       // inspectStoredCredential never returns the token itself, so it's safe to
       // include the result in the status payload.
@@ -323,6 +329,16 @@ export function register(program: Command): void {
         health_state: null as null | string,
         health_error: null as null | string,
         health_status: "unknown" as "ok" | "degraded" | "unknown",
+        // Version reporting — populated below. cli_version is always known
+        // (read from this CLI binary). daemon_version is `null` until the
+        // /healthz probe completes; older daemons (predating the field) also
+        // report null. latest_version is best-effort and `null` if the
+        // registry lookup is skipped or fails.
+        daemon_version: null as null | string,
+        cli_version: cliPackageInfo.version,
+        latest_version: null as null | string,
+        update_available: false,
+        version_hint: null as null | string,
         checked_at_iso: checkedAtIso,
         stale_reason: lockState.state === "stale" ? lockState.reason : null
       };
@@ -334,7 +350,20 @@ export function register(program: Command): void {
         status.health_check_status_code = health.statusCode;
         status.health_state = health.status;
         status.health_error = health.error;
+        status.daemon_version = health.version;
       }
+
+      // Commander turns `--no-registry-check` into `opts.registryCheck === false`.
+      const versionStatus: VersionStatusFields = await computeVersionStatus({
+        cliPackageInfo,
+        daemonVersion: status.daemon_version,
+        daemonRunning: status.running,
+        noRegistryCheck: opts.registryCheck === false
+      });
+      status.daemon_version = versionStatus.daemon_version;
+      status.latest_version = versionStatus.latest_version;
+      status.update_available = versionStatus.update_available;
+      status.version_hint = versionStatus.hint;
 
       if (opts.json) {
         process.stdout.write(JSON.stringify(status, null, 2) + "\n");
@@ -356,6 +385,7 @@ export function register(program: Command): void {
           process.stdout.write(` error=${status.health_error}`);
         }
         process.stdout.write("\n");
+        writeVersionLine(status);
         if (status.bearer_ttl_seconds !== null) {
           process.stdout.write(`bearer_ttl_seconds: ${status.bearer_ttl_seconds}\n`);
         }
@@ -368,10 +398,12 @@ export function register(program: Command): void {
       }
       if (lockState.state === "stale") {
         process.stdout.write(`stale lock (${lockState.reason})\n`);
+        writeVersionLine(status);
         writeAuthStatusLine(authInfo);
         return;
       }
       process.stdout.write("not running\n");
+      writeVersionLine(status);
       writeAuthStatusLine(authInfo);
     });
 
@@ -488,6 +520,41 @@ function toDaemonLockState(lockState: ReturnType<typeof inspectLock>): DaemonLoc
     return { state: "stale" };
   }
   return { state: "missing" };
+}
+
+/**
+ * Render the `version: ...` line for `copillm status` human output.
+ *
+ * When the daemon is running and reports the same version as this CLI, the
+ * line is just `version: 0.4.3` — the common, boring case. Mismatches surface
+ * inline so users see immediately whether they need to restart (cli > daemon)
+ * or `npm install -g copillm` (latest > cli). When the daemon is stopped, the
+ * line only reports the CLI's version, since there is no live daemon version
+ * to compare against.
+ */
+function writeVersionLine(status: {
+  running: boolean;
+  daemon_version: null | string;
+  cli_version: string;
+  version_hint: null | string;
+}): void {
+  let line = "version: ";
+  if (status.running && status.daemon_version !== null) {
+    line += status.daemon_version;
+    if (status.daemon_version !== status.cli_version) {
+      line += ` (cli ${status.cli_version})`;
+    }
+  } else if (status.running && status.daemon_version === null) {
+    // Either an older daemon that predates this field, or a malformed
+    // /healthz response. The version_hint below will prompt a restart.
+    line += `? (cli ${status.cli_version})`;
+  } else {
+    line += `cli ${status.cli_version}`;
+  }
+  if (status.version_hint) {
+    line += ` — ${status.version_hint}`;
+  }
+  process.stdout.write(line + "\n");
 }
 
 /**

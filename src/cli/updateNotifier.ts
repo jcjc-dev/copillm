@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { getCopillmHome } from "../config/home.js";
-import type { PackageInfo } from "./packageInfo.js";
+import type { PackageInfo } from "../config/packageInfo.js";
 
 const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
 const UPDATE_CHECK_TIMEOUT_MS = 3_000;
@@ -105,6 +105,25 @@ export function distTagsUrl(packageName: string, registryUrl = DEFAULT_REGISTRY_
 
 export function isNewerVersion(candidate: string, current: string): boolean {
   return compareSemver(candidate, current) > 0;
+}
+
+/**
+ * Parse `"1" | "true" | "yes" | "on"` → true, `"0" | "false" | "no" | "off"` → false,
+ * anything else → null. Exposed so the status command can mirror the
+ * `COPILLM_UPDATE_CHECK` opt-out semantics without re-implementing the parsing.
+ */
+export function parseBooleanOverride(value: undefined | string): null | boolean {
+  if (value === undefined) {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return null;
 }
 
 function shouldRunUpdateCheck(opts: {
@@ -219,20 +238,6 @@ function notifyIfNewer(stderr: Output, packageInfo: PackageInfo, latestVersion: 
 
 function hasArg(argv: readonly string[], arg: string): boolean {
   return argv.slice(2).includes(arg);
-}
-
-function parseBooleanOverride(value: undefined | string): null | boolean {
-  if (value === undefined) {
-    return null;
-  }
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) {
-    return true;
-  }
-  if (["0", "false", "no", "off"].includes(normalized)) {
-    return false;
-  }
-  return null;
 }
 
 function isTruthyCi(value: undefined | string): boolean {
