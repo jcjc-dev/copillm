@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { AppConfig } from "../types/index.js";
 import { CopilotTokenManager } from "../auth/copilotToken.js";
+import { getPackageInfo } from "../config/packageInfo.js";
 import {
   singleAccountResolver,
   type AccountResolver,
@@ -42,6 +43,7 @@ export async function startProxyServer(input: {
   accountResolver?: AccountResolver;
 }): Promise<{ close: () => Promise<void> }> {
   const debugEnabled = input.debug === true;
+  const packageVersion = getPackageInfo().version;
   const resolver: AccountResolver =
     input.accountResolver ??
     singleAccountResolver({
@@ -95,10 +97,10 @@ export async function startProxyServer(input: {
 
       switch (route.kind) {
         case "livez":
-          handleLivez(res);
+          handleLivez(res, { version: packageVersion });
           return;
         case "healthz":
-          await handleHealthz(res, resolver.default.tokenManager);
+          await handleHealthz(res, resolver.default.tokenManager, { version: packageVersion });
           return;
         case "models":
           await handleModels(res, route.kind, resolver.default);
@@ -124,7 +126,8 @@ export async function startProxyServer(input: {
             tokenManager: resolver.default.tokenManager,
             githubToken: resolver.default.githubToken,
             port: input.port,
-            accounts: resolver.describe()
+            accounts: resolver.describe(),
+            packageVersion
           });
           return;
         case "not_found":

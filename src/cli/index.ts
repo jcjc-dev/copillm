@@ -11,7 +11,7 @@ import * as piCmd from "./commands/agents/pi.js";
 import * as copilotCmd from "./commands/agents/copilot.js";
 import { setRootLogger, setRootProgram } from "./shared/debug.js";
 import { applyDevModeEnv } from "./shared/devMode.js";
-import { getPackageInfo } from "./packageInfo.js";
+import { getPackageInfo } from "../config/packageInfo.js";
 import { maybeNotifyAboutUpdate } from "./updateNotifier.js";
 
 const logger = createLogger();

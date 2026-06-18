@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import type { PackageInfo } from "../packageInfo.js";
+import type { PackageInfo } from "../../config/packageInfo.js";
 import { fetchLatestNpmVersion, isNewerVersion } from "../updateNotifier.js";
 
 /**
