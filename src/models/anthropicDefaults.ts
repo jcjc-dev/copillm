@@ -2,6 +2,7 @@ import fs from "node:fs";
 import { z } from "zod";
 import { accountModelsCacheReadPath, modelsCacheReadPath } from "../config/home.js";
 import { assertValidAccountId } from "../config/accountId.js";
+import { toAnthropicSurfaceModelId } from "./claudeModelId.js";
 
 export type AnthropicFamily = "opus" | "sonnet" | "haiku";
 
@@ -39,11 +40,20 @@ export function computeAnthropicDefaults(modelIds: readonly string[]): Anthropic
       byFamily[family].push(id);
     }
   }
+  // The picked ids feed the ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL env
+  // vars Claude Code reads, so they must be in Claude Code's dash-separated
+  // surface form (e.g. `claude-sonnet-4-6`). A dotted upstream id like
+  // `claude-sonnet-4.6` would canonicalise to the deprecated `claude-sonnet-4-0`
+  // inside Claude Code (see src/models/claudeModelId.ts).
   return {
-    opus: pickPlainLatest(byFamily.opus),
-    sonnet: pickPlainLatest(byFamily.sonnet),
-    haiku: pickPlainLatest(byFamily.haiku)
+    opus: toSurfaceModelId(pickPlainLatest(byFamily.opus)),
+    sonnet: toSurfaceModelId(pickPlainLatest(byFamily.sonnet)),
+    haiku: toSurfaceModelId(pickPlainLatest(byFamily.haiku))
   };
+}
+
+function toSurfaceModelId(modelId: null | string): null | string {
+  return modelId === null ? null : toAnthropicSurfaceModelId(modelId);
 }
 
 export function readModelIdsFromCache(accountId?: string): string[] {

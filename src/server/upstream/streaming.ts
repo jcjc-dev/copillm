@@ -137,6 +137,13 @@ export async function forwardResponse(
       }
       throw error;
     }
+    // Echo back the model id the client requested (Claude Code's dash-separated
+    // surface id) rather than the dotted id upstream returns, so Claude Code
+    // does not re-canonicalise the response model to the deprecated
+    // claude-…-4-0. Streaming already does this via the prelude fallbackModel.
+    if (diagnostics.requestedModel && payload && typeof payload === "object") {
+      (payload as Record<string, unknown>).model = diagnostics.requestedModel;
+    }
   }
   safeSendJson(res, 200, payload);
 }

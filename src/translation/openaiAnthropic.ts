@@ -37,7 +37,7 @@ type AnthropicMessageBlock =
   | AnthropicToolResultBlock;
 
 interface AnthropicUserMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: AnthropicMessageBlock[] | string;
 }
 
@@ -275,7 +275,7 @@ function translateSystemToText(system: AnthropicRequest["system"]): null | strin
 }
 
 function translateAnthropicMessage(message: AnthropicUserMessage): Array<Record<string, unknown>> {
-  if (message.role !== "assistant" && message.role !== "user") {
+  if (message.role !== "assistant" && message.role !== "user" && message.role !== "system") {
     throw new ProtocolTranslationError("unsupported_message_role", `Unsupported Anthropic message role: ${String(message.role)}.`);
   }
   if (typeof message.content === "string") {
@@ -283,6 +283,17 @@ function translateAnthropicMessage(message: AnthropicUserMessage): Array<Record<
   }
   if (!Array.isArray(message.content)) {
     throw new ProtocolTranslationError("invalid_message_content", "Anthropic message content must be a string or array.");
+  }
+
+  if (message.role === "system") {
+    // Claude Code's "mid-conversation system message" feature (a beta it turns on
+    // for correctly-recognised current models, e.g. Opus 4.8) places role:"system"
+    // entries inside `messages`, not just the top-level `system` field. Anthropic's
+    // own API only accepts system at the top level, but copillm translates to
+    // OpenAI chat/completions, which supports system-role messages natively — so
+    // map it through instead of 400ing. A 400 here surfaces to the user as a hard
+    // API error rather than triggering Claude Code's <system-reminder> fallback.
+    return [{ role: "system", content: joinTextBlocks(message.content as AnthropicTextBlock[], "Anthropic system message") }];
   }
 
   return message.role === "assistant"

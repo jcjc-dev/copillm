@@ -7,12 +7,12 @@ describe("buildClaudeEnvBundle", () => {
     const bundle = buildClaudeEnvBundle({
       port: 4141,
       callerSecret: null,
-      defaults: { opus: "claude-opus-4.7", sonnet: "claude-sonnet-4.6", haiku: "claude-haiku-4.5" }
+      defaults: { opus: "claude-opus-4-7", sonnet: "claude-sonnet-4-6", haiku: "claude-haiku-4-5" }
     });
     expect(bundle.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:4141/anthropic");
     expect(bundle.env.ANTHROPIC_AUTH_TOKEN).toBe("copillm-local");
     expect(bundle.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBe("1");
-    expect(bundle.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-4.7");
+    expect(bundle.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("claude-opus-4-7");
     expect(bundle.trailingNotes).toEqual([]);
   });
 
@@ -49,10 +49,10 @@ describe("buildClaudeEnvBundle", () => {
     const bundle = buildClaudeEnvBundle({
       port: 4141,
       callerSecret: null,
-      defaults: { opus: null, sonnet: "claude-sonnet-4.6", haiku: null }
+      defaults: { opus: null, sonnet: "claude-sonnet-4-6", haiku: null }
     });
     expect(bundle.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
-    expect(bundle.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("claude-sonnet-4.6");
+    expect(bundle.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("claude-sonnet-4-6");
     expect(bundle.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBeUndefined();
     expect(bundle.trailingNotes.some((n) => n.includes("opus"))).toBe(true);
     expect(bundle.trailingNotes.some((n) => n.includes("haiku"))).toBe(true);

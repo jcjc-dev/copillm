@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Logger } from "pino";
 import type { AppConfig } from "../../types/index.js";
 import { resolveModelId } from "../../models/discovery.js";
+import { toUpstreamModelId } from "../../models/claudeModelId.js";
 import { CopilotTokenManagerError } from "../../auth/copilotToken.js";
 import {
   anthropicToOpenAI,
@@ -85,7 +86,15 @@ export async function handleProxyForward(input: {
     });
     return;
   }
-  const upstreamBody = resolvedModel ? rewriteRequestedModel(translatedBody, resolvedModel.id) : translatedBody;
+  // Claude Code talks to copillm in its dash-separated surface form
+  // (`claude-sonnet-4-6`); upstream Copilot only accepts the dotted id
+  // (`claude-sonnet-4.6`). Rewrite back before forwarding. A local model
+  // selection already resolves to the dotted catalog id, so only the
+  // unfiltered anthropic path needs the explicit conversion.
+  const upstreamModelId =
+    resolvedModel?.id ??
+    (requestedModel && route.kind === "anthropic" ? toUpstreamModelId(requestedModel) : null);
+  const upstreamBody = upstreamModelId ? rewriteRequestedModel(translatedBody, upstreamModelId) : translatedBody;
   const upstreamPath = route.kind === "codex_responses" ? "/responses" : "/chat/completions";
   const isAnthropicStreaming = route.anthroShape && isStreamingRequestBody(translatedBody);
   let prelude: AnthropicStreamPrelude | null = null;
