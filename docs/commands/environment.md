@@ -18,8 +18,10 @@ nav_order: 9
 | `COPILLM_COPILOT_VERSION` | Pin a specific GitHub Copilot CLI version used by `copillm copilot`. |
 | `COPILLM_PI_VERSION` | Pin a specific pi version used by `copillm pi`. |
 | `COPILLM_PROFILE` | Default `agent.toml` profile to use when `--profile` / `--copillm-profile` is not passed. |
+| `COPILLM_ACCOUNT` | Account to route agent launches at when `--account` / `--copillm-account` is not passed (default: the default account). See [`copillm auth`](../auth/) and [account selection](../claude/#account-selection). |
 | `COPILLM_YOLO` | Tri-state default for `--yolo`: `1`/`true`/`yes`/`on` enables, `0`/`false`/`no`/`off` disables (overrides `agent.toml`), unset defers to config. See [MCP & `agent.toml`](../../mcp/). |
 | `COPILLM_USE_SYSTEM_AGENT` | Set to `1`/`true`/`yes` to let the agent launchers fall back to a matching binary on `PATH`. Off by default, so copillm runs the version it manages. |
 | `COPILLM_UPDATE_CHECK` | Override the startup npm update check: `0`/`false`/`no`/`off` disables it, `1`/`true`/`yes`/`on` forces it on. Also disabled by `--no-update-notifier` or the standard `NO_UPDATE_NOTIFIER` env var. |
 | `CODEX_HOME` | Override the directory where Codex looks for its configuration file. When unset, copillm writes `~/.copillm/codex/config.toml`. |
+| `COPILLM_MAX_REQUEST_BYTES` | Maximum accepted request body size, in bytes. Default `33554432` (32 MiB). Oversized requests are rejected with HTTP `413 payload_too_large` — see the [HTTP API reference](../../http-api/#daemon-side-request-errors). |
 | `ANTHROPIC_BASE_URL` | Set automatically by `copillm claude`. You normally do not set this yourself. |

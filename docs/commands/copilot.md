@@ -36,16 +36,24 @@ Copillm reserves a small set of flags. Each has a long canonical form (`--copill
 | Short | Long (canonical) | Description |
 | --- | --- | --- |
 | `--profile <name>` | `--copillm-profile <name>` | Override the active profile from `~/.copillm/agent.toml` for this launch. |
+| `--account <name>` | `--copillm-account <name>` | Use a specific copillm account's GitHub token for this launch (see [Account selection](#account-selection)). |
 | `--use <spec>` | `--copillm-use <spec>` | Pin the Copilot CLI package version (e.g. `1.0.52` or `@github/copilot@1.0.52`). |
 | `--no-config` | `--copillm-no-config` | Skip `agent.toml` fan-out for this launch. |
 | `--yolo` | — | Allow all tools, paths, and URLs (injects `--allow-all`). Also reads `COPILLM_YOLO` — see [agent.toml docs](../../mcp/) for the tri-state precedence. |
 
 Any other flags are forwarded to the Copilot CLI.
 
+## Account selection
+
+When you hold [more than one account](../auth/), `--account <name>` (alias `--copillm-account <name>`) selects which account's stored GitHub token is injected for this launch. Precedence, highest first: `--account`, then `COPILLM_ACCOUNT`, then the active profile's [`account` pin](../../mcp/#pinning-an-account-to-a-profile), then the default account.
+
+Unlike the other launchers, `copillm copilot` does **not** start the proxy daemon or use a `/<account>` URL prefix — it is a pure credential broker, so account selection here just picks which GitHub token Copilot CLI runs with. An unknown or not-logged-in account fails fast with a clear error.
+
 ## Related environment variables
 
 | Variable | Purpose |
 | --- | --- |
 | `COPILLM_COPILOT_VERSION` | Pin a specific Copilot CLI version. |
+| `COPILLM_ACCOUNT` | Account whose GitHub token to use when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PROFILE` | Default profile selection used when `--copillm-profile` is not passed. |
 | `COPILLM_YOLO` | Tri-state default for `--yolo` (`1`/`true`/`on` → enable; `0`/`false`/`off` → disable; unset → inherit `agent.toml`). |

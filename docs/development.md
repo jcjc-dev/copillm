@@ -64,8 +64,9 @@ node dist/cli.js --dev status           # only ever reports the dev daemon
 node dist/cli.js --dev stop             # only ever stops the dev daemon
 ```
 
-Or use the npm scripts / wrapper shells, which rebuild `dist/` first and pass
-`--dev` for you:
+Or use the npm scripts / wrapper shells. `dev:start` and `dev:stop` rebuild
+`dist/` first and pass `--dev` for you (`dev:status` only reads the daemon's
+lock, so it does not rebuild):
 
 ```bash
 npm run dev:start        # foreground dev daemon (add -- --detach for background)
@@ -74,6 +75,21 @@ npm run dev:status
 ./start.sh               # same as dev:start
 ./stop.sh                # same as dev:stop
 ```
+
+To drive your build like a real CLI — including `copillm-dev claude` and the
+other agent launchers — install a global `copillm-dev` command that runs this
+checkout in `--dev` mode:
+
+```bash
+npm run build && npm run dev:link     # installs a global `copillm-dev` shim
+copillm-dev start --detach
+copillm-dev claude
+npm run dev:unlink                    # remove it when you're done
+```
+
+`copillm-dev` is just a thin shim that execs this checkout's `dist/cli.js` with
+`--dev`, so it shares the isolated home and port above and never collides with a
+production `copillm`. Rebuild (`npm run build`) to pick up source changes.
 
 What `--dev` changes:
 

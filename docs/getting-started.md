@@ -33,12 +33,10 @@ Verify with:
 
 ```bash
 copillm auth status
-# stored: true
-# backend: keyring
-# user: { login: "your-handle", name: "Your Name" }
+# logged in as @your-handle (Your Name) (OS keychain)
 ```
 
-The token is **never** printed.
+The token is **never** printed. Once you add a second account, `auth status` switches to a per-account listing — see [`copillm auth`](../commands/auth/).
 
 ## 2. Launch an agent
 

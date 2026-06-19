@@ -122,6 +122,22 @@ copillm config sync --agent claude --profile work   # one-off override
 
 The `--profile` flag on `sync` and `show` overrides `active_profile` for that invocation only.
 
+### Pinning an account to a profile
+
+If you use [multiple accounts](../commands/auth/), a profile can pin which one its launches use. Add an `account` key to the profile:
+
+```toml
+[profiles.work]
+account = "work"
+
+[profiles.work.mcp.servers.ado]
+transport = "stdio"
+command = "agency"
+args = ["mcp", "ado"]
+```
+
+Now `copillm codex --profile work` (or any launch with `work` active) routes at the `work` account. The value must name an account from `copillm auth status`. A launch's `--account` flag or the `COPILLM_ACCOUNT` env var still overrides the pin — the full precedence is `--account` > `COPILLM_ACCOUNT` > the profile's `account` > the default account.
+
 ## Environment variable expansion
 
 `${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `url`, `env` values, and `headers` values at load time:
@@ -166,7 +182,9 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ### Copilot CLI
 
-- Currently a no-op stub. The native format is not yet publicly documented.
+- `copillm copilot` writes a copillm-owned MCP config to `~/.copillm/copilot/mcp-config.json` and appends `--additional-mcp-config @<path>` for that launch. `copillm config sync --agent copilot` writes the same managed file without launching.
+- Each server is emitted with `tools: ["*"]`; stdio servers use `type: "local"`, http/sse servers keep their transport type and URL.
+- When the active profile declares no MCP servers, the managed file is removed and no flag is added.
 
 ## Instructions block (bonus)
 
