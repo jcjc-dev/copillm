@@ -74,7 +74,7 @@ copillm prints a one-line notice naming the account whenever one is chosen by fl
 copillm: using account "work" (from --account)
 ```
 
-The launch is validated up front: an unknown, malformed, or not-logged-in account fails fast with a clear error. Model discovery for the generated Codex config runs as the selected account, so each account's catalogue is accurate. Under the hood Codex is pointed at `http://127.0.0.1:4141/<account>/codex`; see [Selecting an account](../../http-api/#selecting-an-account) for the routing details.
+The launch is validated up front: an unknown, malformed, or not-logged-in account fails fast with a clear error. Model discovery for the generated Codex config runs as the selected account, so each account's catalogue is accurate. Under the hood Codex is pointed at `http://127.0.0.1:4141/<account>/codex/v1`; see [Selecting an account](../../http-api/#selecting-an-account) for the routing details.
 
 ## Related environment variables
 

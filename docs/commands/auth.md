@@ -57,7 +57,7 @@ copillm auth status [--json] [--no-user]
 | `--json` | Emit a JSON result. The shape depends on whether you have multiple accounts (see below). |
 | `--no-user` | Skip the `GET https://api.github.com/user` lookup. The status falls back to this behaviour automatically when the GitHub API is unreachable. |
 
-**Single account** (no accounts index): the original one-line output.
+**Single account** (no accounts index): the original one-line output. The `(Your Name)` portion appears only when your GitHub display name differs from your login.
 
 ```text
 logged in as @your-handle (Your Name) (OS keychain)
