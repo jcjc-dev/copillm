@@ -29,6 +29,8 @@
     "dev:start": "npm run build && node dist/cli.js --dev start",
     "dev:stop": "npm run build && node dist/cli.js --dev stop",
     "dev:status": "node dist/cli.js --dev status",
+    "dev:link": "node scripts/dev-link.mjs",
+    "dev:unlink": "node scripts/dev-unlink.mjs",
     "lint": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit && eslint src",
     "lint:boundaries": "eslint src",
     "test": "vitest run",
