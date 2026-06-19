@@ -19,9 +19,9 @@ describe("anthropicDefaults.computeAnthropicDefaults", () => {
       "gpt-5.4"
     ]);
     expect(defaults).toEqual({
-      opus: "claude-opus-4.7",
-      sonnet: "claude-sonnet-4.6",
-      haiku: "claude-haiku-4.5"
+      opus: "claude-opus-4-7",
+      sonnet: "claude-sonnet-4-6",
+      haiku: "claude-haiku-4-5"
     });
   });
 
@@ -31,12 +31,12 @@ describe("anthropicDefaults.computeAnthropicDefaults", () => {
       "claude-opus-4.7-1m-internal[1m]",
       "claude-sonnet-4.6"
     ]);
-    expect(defaults.opus).toBe("claude-opus-4.7");
+    expect(defaults.opus).toBe("claude-opus-4-7");
   });
 
   it("returns null for families that have no models", () => {
     const defaults = computeAnthropicDefaults(["claude-opus-4.7", "gpt-5"]);
-    expect(defaults.opus).toBe("claude-opus-4.7");
+    expect(defaults.opus).toBe("claude-opus-4-7");
     expect(defaults.sonnet).toBeNull();
     expect(defaults.haiku).toBeNull();
   });
@@ -62,6 +62,22 @@ describe("anthropicDefaults.computeAnthropicDefaults", () => {
     const defaults = computeAnthropicDefaults(["gpt-opus", "gpt-sonnet", "gpt-haiku"]);
     expect(defaults).toEqual({ opus: null, sonnet: null, haiku: null });
   });
+
+  it("emits Claude Code's dash-separated surface id, not the dotted upstream id", () => {
+    // A dotted id like claude-sonnet-4.6 collides with Claude Code's legacy
+    // canonicaliser and is treated as the deprecated claude-sonnet-4-0; the
+    // dashed form is matched correctly. See src/models/claudeModelId.ts.
+    const defaults = computeAnthropicDefaults([
+      "claude-opus-4.8",
+      "claude-sonnet-4.6",
+      "claude-haiku-4.5"
+    ]);
+    expect(defaults).toEqual({
+      opus: "claude-opus-4-8",
+      sonnet: "claude-sonnet-4-6",
+      haiku: "claude-haiku-4-5"
+    });
+  });
 });
 
 describe("anthropicDefaults.buildClaudeExportCommand", () => {
@@ -69,14 +85,14 @@ describe("anthropicDefaults.buildClaudeExportCommand", () => {
     const cmd = buildClaudeExportCommand({
       port: 4141,
       callerSecret: null,
-      defaults: { opus: "claude-opus-4.7", sonnet: "claude-sonnet-4.6", haiku: "claude-haiku-4.5" },
+      defaults: { opus: "claude-opus-4-7", sonnet: "claude-sonnet-4-6", haiku: "claude-haiku-4-5" },
       enableGatewayDiscovery: true
     });
     expect(cmd).toContain("ANTHROPIC_BASE_URL=http://127.0.0.1:4141/anthropic");
     expect(cmd).toContain("ANTHROPIC_AUTH_TOKEN=copillm-local");
-    expect(cmd).toContain("ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7");
-    expect(cmd).toContain("ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4.6");
-    expect(cmd).toContain("ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4.5");
+    expect(cmd).toContain("ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-7");
+    expect(cmd).toContain("ANTHROPIC_DEFAULT_SONNET_MODEL=claude-sonnet-4-6");
+    expect(cmd).toContain("ANTHROPIC_DEFAULT_HAIKU_MODEL=claude-haiku-4-5");
     expect(cmd).toContain("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1");
     expect(cmd.endsWith(" claude")).toBe(true);
   });
@@ -85,11 +101,11 @@ describe("anthropicDefaults.buildClaudeExportCommand", () => {
     const cmd = buildClaudeExportCommand({
       port: 4242,
       callerSecret: "abc",
-      defaults: { opus: "claude-opus-4.7", sonnet: null, haiku: null },
+      defaults: { opus: "claude-opus-4-7", sonnet: null, haiku: null },
       enableGatewayDiscovery: false
     });
     expect(cmd).toContain("ANTHROPIC_AUTH_TOKEN=abc");
-    expect(cmd).toContain("ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4.7");
+    expect(cmd).toContain("ANTHROPIC_DEFAULT_OPUS_MODEL=claude-opus-4-7");
     expect(cmd).not.toContain("ANTHROPIC_DEFAULT_SONNET_MODEL");
     expect(cmd).not.toContain("ANTHROPIC_DEFAULT_HAIKU_MODEL");
     expect(cmd).not.toContain("CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY");

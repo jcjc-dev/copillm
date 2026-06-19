@@ -209,4 +209,29 @@ describe("buildAnthropicModelsResponse", () => {
     ]);
     expect(response.data[0].id).toBe("claude-test-opus-already[1m]");
   });
+
+  it("maps a dotted upstream claude version to Claude Code's dashed surface id", () => {
+    // Claude Code canonicalises a dotted id (claude-…-4.6) to the deprecated
+    // claude-…-4-0; the dashed form is matched correctly. See claudeModelId.ts.
+    const response = buildAnthropicModelsResponse([
+      model({ id: "claude-test-sonnet-4.6", name: "Claude Test Sonnet 4.6" }) as never,
+      model({ id: "claude-test-haiku-4.5" }) as never
+    ]);
+    expect(response.data.map((entry) => entry.id)).toEqual([
+      "claude-test-sonnet-4-6",
+      "claude-test-haiku-4-5"
+    ]);
+    // display_name is the user-visible label and keeps its dotted spelling.
+    expect(response.data[0].display_name).toBe("Claude Test Sonnet 4.6");
+  });
+
+  it("combines the dashed surface id with the [1m] opus alias", () => {
+    const response = buildAnthropicModelsResponse([
+      model({
+        id: "claude-test-opus-4.8",
+        capabilities: { limits: { max_context_window_tokens: 1_000_000 } }
+      }) as never
+    ]);
+    expect(response.data[0].id).toBe("claude-test-opus-4-8[1m]");
+  });
 });

@@ -1,4 +1,5 @@
 import type { CopilotModel } from "../models/discovery.js";
+import { toAnthropicSurfaceModelId } from "../models/claudeModelId.js";
 
 interface AnthropicModelEntry {
   type: "model";
@@ -75,13 +76,18 @@ export function buildAnthropicModelsResponse(models: readonly CopilotModel[]): A
  * picker — a label that would imply 1M-class behaviour Claude Code would
  * never deliver for that vendor.
  *
+ * The base id is first mapped to Claude Code's dash-separated surface form
+ * (`claude-sonnet-4.6` -> `claude-sonnet-4-6`) via `toAnthropicSurfaceModelId`
+ * so the advertised id is not mistaken for the deprecated `claude-sonnet-4-0`
+ * (see src/models/claudeModelId.ts).
+ *
  * Models already carrying the suffix are left alone. Models below the 1M
  * threshold get no alias regardless of name — Claude Code has no
  * client-side marker for the 200K-1M intermediate range, and over-claiming
  * would set the wrong autocompact trigger.
  */
 export function applyOneMillionAlias(model: CopilotModel): string {
-  const baseId = typeof model.id === "string" ? model.id : "";
+  const baseId = toAnthropicSurfaceModelId(typeof model.id === "string" ? model.id : "");
   if (baseId.endsWith(ONE_M_ALIAS_SUFFIX)) {
     return baseId;
   }

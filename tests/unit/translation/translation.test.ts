@@ -254,6 +254,38 @@ describe("translation", () => {
     );
   });
 
+  it("maps a mid-conversation role:system message to an OpenAI system message (Claude Code mid-conv-system)", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-opus",
+      system: "top-level system",
+      messages: [
+        { role: "user", content: "hello" },
+        { role: "system", content: "learned mid-session: be terse" },
+        { role: "assistant", content: "ok" }
+      ]
+    });
+    expect(request.messages).toEqual([
+      { role: "system", content: "top-level system" },
+      { role: "user", content: "hello" },
+      { role: "system", content: "learned mid-session: be terse" },
+      { role: "assistant", content: "ok" }
+    ]);
+  });
+
+  it("joins text blocks inside a role:system message", () => {
+    const request = anthropicToOpenAI({
+      model: "claude-test-opus",
+      messages: [
+        { role: "system", content: [{ type: "text", text: "line 1" }, { type: "text", text: "line 2" }] },
+        { role: "user", content: "hi" }
+      ]
+    });
+    expect(request.messages).toEqual([
+      { role: "system", content: "line 1\nline 2" },
+      { role: "user", content: "hi" }
+    ]);
+  });
+
   it("still rejects non-text blocks inside a system prompt (joinTextBlocks regression guard)", () => {
     expect(() =>
       anthropicToOpenAI({
