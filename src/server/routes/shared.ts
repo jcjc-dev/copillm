@@ -148,6 +148,80 @@ function isLoopbackAddress(value: string): boolean {
   return value === "127.0.0.1" || value === "::1" || value === "::ffff:127.0.0.1";
 }
 
+/**
+ * Set of allowed `Host` header values for the proxy. Used by both the runtime
+ * guard and unit tests. Hostnames are case-insensitive per RFC 7230 §5.4, so
+ * the comparison normalises to lowercase. Port comparison is exact.
+ *
+ * Why this matters (DNS-rebinding defence):
+ *   isLocalRequest() only confirms the TCP peer address is loopback. A web
+ *   page on attacker.com that DNS-rebinds attacker.com → 127.0.0.1 can issue
+ *   `fetch('http://attacker.com:4141/v1/messages', …)`, and the browser
+ *   treats that as same-origin (no CORS preflight). The request arrives on
+ *   the loopback socket with `Host: attacker.com:4141`. Without a Host check
+ *   the proxy would happily serve the request, leaking the user's Copilot
+ *   quota and the model's response to attacker-controlled JS. The Host check
+ *   pins the request to a loopback hostname so a rebound third-party host is
+ *   rejected with 421 misdirected_request.
+ */
+export function allowedHostHeaders(port: number): ReadonlySet<string> {
+  const set = new Set<string>();
+  set.add(`127.0.0.1:${port}`);
+  set.add(`localhost:${port}`);
+  // IPv6 loopback per RFC 7230 §2.7.1 / RFC 3986 §3.2.2: bracketed form.
+  set.add(`[::1]:${port}`);
+  return set;
+}
+
+/**
+ * Returns null when the request's Host/Origin/Sec-Fetch-Site headers prove
+ * it came from a same-origin loopback caller; otherwise an error string the
+ * caller logs and converts to an HTTP response.
+ */
+export function checkLoopbackOriginHeaders(
+  req: IncomingMessage,
+  port: number
+):
+  | { ok: true }
+  | { ok: false; reason: "host_mismatch" | "origin_cross_site" | "sec_fetch_cross_site"; detail: string } {
+  const allowed = allowedHostHeaders(port);
+  const rawHost = req.headers.host;
+  const host = typeof rawHost === "string" ? rawHost.toLowerCase().trim() : "";
+  // An empty / missing Host header is reserved for HTTP/1.0 — modern browsers
+  // never omit it. Treat it as suspicious.
+  if (!allowed.has(host)) {
+    return { ok: false, reason: "host_mismatch", detail: `host="${rawHost ?? ""}"` };
+  }
+
+  const rawOrigin = req.headers.origin;
+  if (typeof rawOrigin === "string" && rawOrigin.length > 0 && rawOrigin !== "null") {
+    let originHost: string;
+    try {
+      const url = new URL(rawOrigin);
+      // Default ports (80 for http, 443 for https) mean URL omits :port. Always
+      // build a host:port for comparison.
+      const explicitPort = url.port.length > 0 ? url.port : url.protocol === "https:" ? "443" : "80";
+      originHost = `${url.hostname.toLowerCase()}:${explicitPort}`;
+    } catch {
+      return { ok: false, reason: "origin_cross_site", detail: `origin="${rawOrigin}"` };
+    }
+    if (!allowed.has(originHost)) {
+      return { ok: false, reason: "origin_cross_site", detail: `origin="${rawOrigin}"` };
+    }
+  }
+
+  // Belt-and-suspenders: modern browsers send Sec-Fetch-Site for every
+  // navigational + fetch request. `same-origin`, `same-site`, and `none` are
+  // safe (none = address bar / extension); anything else is cross-site.
+  const sfs = req.headers["sec-fetch-site"];
+  if (typeof sfs === "string" && sfs.length > 0) {
+    if (sfs !== "same-origin" && sfs !== "same-site" && sfs !== "none") {
+      return { ok: false, reason: "sec_fetch_cross_site", detail: `sec-fetch-site="${sfs}"` };
+    }
+  }
+  return { ok: true };
+}
+
 export function safePathname(rawUrl: string | undefined): string {
   if (!rawUrl) {
     return "/";

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { parsePinSpec, packageNameFor, binNameFor } from "../../../src/cli/resolveAgent.js";
+import { InvalidPinSpecError, parsePinSpec, packageNameFor, binNameFor } from "../../../src/cli/resolveAgent.js";
 
 describe("parsePinSpec", () => {
   it("returns default package + null version for empty input", () => {
@@ -16,7 +16,7 @@ describe("parsePinSpec", () => {
     expect(parsePinSpec("pi", "0.75.4")).toEqual({ packageName: "@earendil-works/pi-coding-agent", version: "0.75.4" });
   });
 
-  it("parses scoped <pkg>@<ver> form", () => {
+  it("parses scoped <pkg>@<ver> form (CLI source) when pkg matches the official package", () => {
     expect(parsePinSpec("codex", "@openai/codex@1.4.7")).toEqual({
       packageName: "@openai/codex",
       version: "1.4.7"
@@ -27,14 +27,52 @@ describe("parsePinSpec", () => {
     });
   });
 
-  it("parses unscoped <pkg>@<ver>", () => {
-    expect(parsePinSpec("codex", "codex@1.0.0")).toEqual({ packageName: "codex", version: "1.0.0" });
+  /**
+   * Audit finding (high): the old parser accepted `<arbitrary-pkg>@<ver>`
+   * verbatim and ran `npm install` against it. A `.envrc` could carry
+   * `COPILLM_CLAUDE_VERSION='evil-pkg@1.0.0'` and silently install code from
+   * a malicious package on the next `copillm claude` run. The new parser:
+   *   • for source="env" (the .envrc/CI path), accepts ONLY a bare version
+   *   • for source="cli" (--copillm-use), accepts `<official-pkg>@<ver>` only
+   * Either form refuses an arbitrary package name.
+   */
+  it("REFUSES an unscoped <pkg>@<ver> that doesn't match the official package (CLI)", () => {
+    expect(() => parsePinSpec("codex", "codex@1.0.0", "cli")).toThrow(InvalidPinSpecError);
+    expect(() => parsePinSpec("codex", "evil-pkg@1.0.0", "cli")).toThrow(InvalidPinSpecError);
   });
 
-  it("treats a bare scoped package (no version separator) as package-only", () => {
+  it("REFUSES a scoped <pkg>@<ver> that doesn't match the official package (CLI)", () => {
+    expect(() => parsePinSpec("claude", "@evil/codex@1.0.0", "cli")).toThrow(InvalidPinSpecError);
+    expect(() => parsePinSpec("claude", "@openai/codex@1.0.0", "cli")).toThrow(InvalidPinSpecError);
+  });
+
+  it("REFUSES any <pkg>@<ver> at all when source=env (only bare versions allowed)", () => {
+    expect(() => parsePinSpec("claude", "@anthropic-ai/claude-code@2.0.0", "env")).toThrow(
+      InvalidPinSpecError
+    );
+    expect(() => parsePinSpec("claude", "evil-pkg@1.0.0", "env")).toThrow(InvalidPinSpecError);
+    // But a bare version still works under env.
+    expect(parsePinSpec("claude", "2.0.0", "env")).toEqual({
+      packageName: "@anthropic-ai/claude-code",
+      version: "2.0.0"
+    });
+  });
+
+  it("REFUSES a version containing shell metacharacters (env or CLI)", () => {
+    // Even if a `cli` caller forgot to validate, the shell-metachar gate must
+    // catch '1.0.0 & echo PWNED' before it ever reaches spawnSync.
+    expect(() => parsePinSpec("claude", "1.0.0 & echo PWNED", "env")).toThrow(InvalidPinSpecError);
+    expect(() => parsePinSpec("claude", "@anthropic-ai/claude-code@1.0.0; rm -rf /", "cli")).toThrow(
+      InvalidPinSpecError
+    );
+    expect(() => parsePinSpec("claude", "1.0.0|whoami", "cli")).toThrow(InvalidPinSpecError);
+  });
+
+  it("treats a bare scoped package (no version separator) as package-only when it matches the official pkg", () => {
     // `lastIndexOf("@")` returns 0 for `@scope/pkg`, and the `lastAt > 0` guard
-    // must skip splitting in that case. A regression here would split into
-    // { packageName: "", version: "openai/codex" } and silently install nothing.
+    // must skip splitting in that case. The bare-pkg-only path now also gates
+    // on the official-package check, so an attempt to pass a foreign scoped
+    // package by itself is rejected.
     expect(parsePinSpec("codex", "@openai/codex")).toEqual({
       packageName: "@openai/codex",
       version: null
@@ -45,8 +83,16 @@ describe("parsePinSpec", () => {
     });
   });
 
-  it("treats an unscoped package name (no @ at all) as package-only", () => {
-    expect(parsePinSpec("codex", "codex")).toEqual({ packageName: "codex", version: null });
+  it("REFUSES a bare scoped package whose name doesn't match the official pkg", () => {
+    expect(() => parsePinSpec("claude", "@evil-scope/evil-pkg", "cli")).toThrow(InvalidPinSpecError);
+  });
+
+  it("REFUSES an unscoped package name with no @ at all (was permissive in the old parser)", () => {
+    // The OLD parser returned `{packageName: "evil-pkg", version: null}` here,
+    // which let an env-supplied "evil-pkg" install verbatim. New parser
+    // refuses anything that isn't a bare version OR the official package.
+    expect(() => parsePinSpec("codex", "evil-pkg")).toThrow(InvalidPinSpecError);
+    expect(() => parsePinSpec("codex", "evil-pkg", "env")).toThrow(InvalidPinSpecError);
   });
 
   it("normalises surrounding whitespace before parsing", () => {
@@ -308,6 +354,134 @@ describe("resolveAgent (npm view fallback)", async () => {
       await expect(
         resolveAgent("codex", { cacheRoot, npmExecutable })
       ).rejects.toThrow(/could not reach npm registry/i);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * Audit finding (high): the install path used to call
+ * `spawnSync(..., { shell: process.platform === 'win32' })` and pass the npm
+ * spec WITHOUT `--ignore-scripts`. Two failure modes:
+ *   • Windows shell-injection via attacker-influenced version strings
+ *     (caught by `parsePinSpec` above, but defence-in-depth still matters).
+ *   • A tampered package's preinstall/postinstall script runs as the user
+ *     before the bin smoke-test catches the unusable package.
+ *
+ * The runtime fix in `src/cli/resolveAgent.ts`:
+ *   • spawns npm without `shell: true` (Windows routes through cmd.exe with
+ *     safe quoting via `windowsSpawn`'s buildWindowsCmdInvocation)
+ *   • passes `--ignore-scripts` to npm install
+ *
+ * We exercise the install code path with a fake npm shim that records its
+ * argv into a file so we can assert the args without depending on real npm.
+ */
+describe("resolveAgent (install args)", async () => {
+  const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
+
+  /**
+   * Fake npm that records its full argv to <tmp>/npm-argv.json and EXITS 0
+   * for `view`/`install`. For `install`, it also stages the cache layout the
+   * resolver expects so the smoke-test passes.
+   */
+  function recordingNpm(dir: string, argvPath: string): string {
+    fs.mkdirSync(dir, { recursive: true });
+    if (process.platform === "win32") {
+      // Minimal Node-backed shim — record argv, then mimic a successful npm
+      // install by creating the bin under --prefix.
+      const jsPath = path.join(dir, "fake-npm-impl.js");
+      fs.writeFileSync(
+        jsPath,
+        `const fs = require('node:fs');
+const path = require('node:path');
+const argv = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(argvPath)}, JSON.stringify(argv) + "\\n");
+if (argv[0] === 'install') {
+  const prefixIdx = argv.indexOf('--prefix');
+  const prefix = argv[prefixIdx + 1];
+  const binDir = path.join(prefix, 'node_modules', '.bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const binPath = path.join(binDir, 'codex.cmd');
+  fs.writeFileSync(binPath, '@echo 0.0.1\\r\\n');
+}
+if (argv[0] === 'view') process.stdout.write('1.2.3\\n');
+process.exit(0);
+`
+      );
+      const cmdPath = path.join(dir, "fake-npm.cmd");
+      fs.writeFileSync(cmdPath, `@node "${jsPath}" %*\r\n`);
+      return cmdPath;
+    }
+    const shPath = path.join(dir, "fake-npm");
+    fs.writeFileSync(
+      shPath,
+      `#!/usr/bin/env node
+const fs = require('node:fs');
+const path = require('node:path');
+const argv = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(argvPath)}, JSON.stringify(argv) + "\\n");
+if (argv[0] === 'install') {
+  const prefixIdx = argv.indexOf('--prefix');
+  const prefix = argv[prefixIdx + 1];
+  const binDir = path.join(prefix, 'node_modules', '.bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const binPath = path.join(binDir, 'codex');
+  fs.writeFileSync(binPath, '#!/bin/sh\\necho 0.0.1\\n', { mode: 0o755 });
+}
+if (argv[0] === 'view') process.stdout.write('1.2.3\\n');
+process.exit(0);
+`,
+      { mode: 0o755 }
+    );
+    return shPath;
+  }
+
+  it("passes --ignore-scripts to npm install", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-argv-"));
+    try {
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog);
+      const cacheRoot = path.join(tmp, "cache");
+
+      await resolveAgent("codex", { cacheRoot, npmExecutable: npmExe });
+
+      const recorded = fs
+        .readFileSync(argvLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      const installCall = recorded.find((argv) => argv[0] === "install");
+      expect(installCall, `expected an install call. Got: ${JSON.stringify(recorded)}`).toBeDefined();
+      expect(installCall).toContain("--ignore-scripts");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the canonical install args (prefix + no-audit + no-fund + omit=dev + ignore-scripts + spec)", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-args-canonical-"));
+    try {
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog);
+      const cacheRoot = path.join(tmp, "cache");
+
+      await resolveAgent("codex", { cacheRoot, npmExecutable: npmExe });
+
+      const recorded = fs
+        .readFileSync(argvLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      const installCall = recorded.find((argv) => argv[0] === "install")!;
+      // Must contain each safety flag exactly once.
+      expect(installCall.filter((a) => a === "--no-audit")).toHaveLength(1);
+      expect(installCall.filter((a) => a === "--no-fund")).toHaveLength(1);
+      expect(installCall.filter((a) => a === "--omit=dev")).toHaveLength(1);
+      expect(installCall.filter((a) => a === "--ignore-scripts")).toHaveLength(1);
+      // The spec must end with @<version> (the fake npm view returned "1.2.3").
+      const spec = installCall[installCall.length - 1];
+      expect(spec).toBe("@openai/codex@1.2.3");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

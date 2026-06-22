@@ -1,15 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptionsWithBufferEncoding } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getCopillmHome } from "../config/home.js";
 import { type AgentName, AGENT_REGISTRY } from "../integrations/registry.js";
+import { buildWindowsCmdInvocation } from "./windowsSpawn.js";
 
 export type { AgentName };
 export type ResolveSource = "path" | "cache" | "installed";
 
 export interface ResolveOptions {
   pinnedSpec?: string;
+  /**
+   * Where the pin came from. `env` is the most-untrusted source (a project's
+   * direnv `.envrc` or CI-side env can carry it); `cli` is what the user just
+   * typed on the command line. The validator is stricter for `env`.
+   * Defaults to `cli` so legacy callers keep their old (more permissive)
+   * behaviour.
+   */
+  pinnedSource?: PinSource;
   preferPath?: boolean;
   cacheRoot?: string;
   npmExecutable?: string;
@@ -40,26 +49,94 @@ interface ParsedPin {
   version: null | string;
 }
 
-export function parsePinSpec(agent: AgentName, raw: string): ParsedPin {
+export type PinSource = "env" | "cli";
+
+export class InvalidPinSpecError extends Error {
+  public constructor(message: string) {
+    super(message);
+    this.name = "InvalidPinSpecError";
+  }
+}
+
+/**
+ * Conservative version-range pattern. Must START with a digit or a semver
+ * range operator (^ ~ > < = *) and continue with semver-charset characters.
+ * Refuses spaces and shell metacharacters (`& | ; < > ( ) ^ " ' \``) so a
+ * spec like `1.0.0 & echo PWNED` can never reach `spawnSync` even if the
+ * caller forgot to use the windowsSpawn helper.
+ *
+ * Deliberately rejects strings that look like package names (`evil-pkg`) —
+ * those flow through the package-name path that requires equality with the
+ * official package name for this agent.
+ */
+const SAFE_VERSION_PATTERN = /^[\d^~><=*][\w.+~^*><=\-]*$/;
+
+/**
+ * Parse `--copillm-use` / `COPILLM_<AGENT>_VERSION`. The `source` argument
+ * decides how much we trust the input:
+ *
+ *   • source: "env"  — accept ONLY a bare version range. A malicious
+ *     `.envrc`, direnv config, or CI variable can carry `evil-pkg@1.0.0`,
+ *     which the old parser would happily install as `evil-pkg`. With this
+ *     restriction the worst an env-supplied pin can do is pin a (possibly
+ *     non-existent) version of the OFFICIAL package.
+ *
+ *   • source: "cli"  — accept the bare version form AND the `<pkg>@<ver>`
+ *     form, but require `pkg` to equal the official package for the agent
+ *     when both are present. This preserves the documented `--copillm-use
+ *     @anthropic-ai/claude-code@1.4.7` pattern while still refusing
+ *     `--copillm-use evil-pkg@1.0.0`.
+ *
+ * Throws `InvalidPinSpecError` on rejection so the CLI surfaces a clear
+ * message to the user instead of silently installing arbitrary code.
+ */
+export function parsePinSpec(agent: AgentName, raw: string, source: PinSource = "cli"): ParsedPin {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     return { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
   }
-  // Bare version like "1.4.7" or "^1.0.0"
-  if (/^[\d^~><=*]/.test(trimmed)) {
-    return { packageName: AGENT_REGISTRY[agent].npmPackage, version: trimmed };
+  const officialPkg = AGENT_REGISTRY[agent].npmPackage;
+  const lookLikeBareVersion = SAFE_VERSION_PATTERN.test(trimmed);
+  if (lookLikeBareVersion) {
+    return { packageName: officialPkg, version: trimmed };
   }
-  // <pkg>@<version>; tolerate scoped pkgs starting with @
+  if (source === "env") {
+    throw new InvalidPinSpecError(
+      `COPILLM_${agent.toUpperCase()}_VERSION must be a bare semver range (e.g. "1.4.7" or "^1.0.0"); got "${trimmed}". ` +
+        `Refusing to install an env-supplied package spec — only the version field is configurable from the environment.`
+    );
+  }
+  // CLI source: still allow the documented `<pkg>@<ver>` form, but only when
+  // `pkg` matches the official package for this agent.
   const isScoped = trimmed.startsWith("@");
   const lastAt = trimmed.lastIndexOf("@");
   if (lastAt > 0 && (!isScoped || lastAt > 0)) {
     const pkg = trimmed.slice(0, lastAt);
     const ver = trimmed.slice(lastAt + 1);
     if (pkg && ver) {
+      if (pkg !== officialPkg) {
+        throw new InvalidPinSpecError(
+          `--copillm-use may only pin the official package "${officialPkg}" for agent "${agent}"; got "${pkg}". ` +
+            `If you need a custom package, install it manually and pass --copillm-use <bare-version>.`
+        );
+      }
+      if (!SAFE_VERSION_PATTERN.test(ver)) {
+        throw new InvalidPinSpecError(
+          `Version "${ver}" contains characters outside [A-Za-z0-9._+~^*><=-]; refusing to forward to npm.`
+        );
+      }
       return { packageName: pkg, version: ver };
     }
   }
-  return { packageName: trimmed, version: null };
+  // Bare package name with no version separator — treat as package-only.
+  // Same allowlist gate so a malicious env var can't slip through via a
+  // future caller that passes source="cli".
+  if (trimmed === officialPkg) {
+    return { packageName: officialPkg, version: null };
+  }
+  throw new InvalidPinSpecError(
+    `Could not parse pin spec "${trimmed}". Expected a bare version range, "${officialPkg}@<version>", or "${officialPkg}".`
+  );
 }
 
 export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}): Promise<ResolveResult> {
@@ -67,7 +144,9 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const npmExe = opts.npmExecutable ?? defaultNpmExecutable();
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
 
-  const pin = opts.pinnedSpec ? parsePinSpec(agent, opts.pinnedSpec) : { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
+  const pin = opts.pinnedSpec
+    ? parsePinSpec(agent, opts.pinnedSpec, opts.pinnedSource ?? "cli")
+    : { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
   const pkg = pin.packageName;
   const binName = AGENT_REGISTRY[agent].binName;
   const agentRoot = path.join(cacheRoot, agent);
@@ -187,14 +266,25 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     fs.mkdirSync(finalDir, { recursive: true });
 
     const spec = `${pkg}@${target}`;
-    const installResult = spawnSync(
-      npmExe,
-      ["install", "--prefix", finalDir, "--no-audit", "--no-fund", "--omit=dev", spec],
-      {
-        stdio: ["ignore", "inherit", "inherit"],
-        shell: process.platform === "win32"
-      }
-    );
+    // `--ignore-scripts` blocks preinstall/install/postinstall lifecycle
+    // scripts. Even if the version validator above let a tampered version
+    // string through, a malicious package's postinstall script never runs
+    // before the bin smoke-test below catches an unusable package.
+    // Every supported agent publishes its bin via `bin` in package.json, so
+    // none of them rely on a postinstall step to land the executable.
+    const installArgs = [
+      "install",
+      "--prefix",
+      finalDir,
+      "--no-audit",
+      "--no-fund",
+      "--omit=dev",
+      "--ignore-scripts",
+      spec
+    ];
+    const installResult = spawnSyncSafe(npmExe, installArgs, {
+      stdio: ["ignore", "inherit", "inherit"]
+    });
     if (installResult.status !== 0) {
       cleanupFailedInstall(finalDir);
       const msg = installResult.error ? `: ${installResult.error.message}` : "";
@@ -250,9 +340,19 @@ function findReadyCachedBin(dir: string, binName: string): null | string {
 }
 
 function defaultNpmExecutable(): string {
-  return process.env.COPILLM_NPM_EXECUTABLE && process.env.COPILLM_NPM_EXECUTABLE.trim().length > 0
-    ? process.env.COPILLM_NPM_EXECUTABLE
-    : "npm";
+  const override = process.env.COPILLM_NPM_EXECUTABLE;
+  if (override && override.trim().length > 0) {
+    return override;
+  }
+  if (process.platform === "win32") {
+    // npm ships as both `npm.cmd` and `npm.ps1` on Windows. We need to know
+    // up-front so `spawnSyncSafe` routes the call through cmd.exe with safe
+    // quoting (CreateProcess can't exec a .cmd batch directly). Walking PATH
+    // here keeps callers from having to know the difference.
+    const found = findOnPath("npm");
+    if (found) return found;
+  }
+  return "npm";
 }
 
 function binPathInPrefix(prefix: string, binName: string): null | string {
@@ -306,9 +406,8 @@ function probeVersion(binPath: string): null | string {
 }
 
 function npmViewLatest(npmExe: string, pkg: string): string {
-  const result = spawnSync(npmExe, ["view", pkg, "version"], {
+  const result = spawnSyncSafe(npmExe, ["view", pkg, "version"], {
     stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32",
     timeout: 30_000
   });
   if (result.status !== 0) {
@@ -319,6 +418,30 @@ function npmViewLatest(npmExe: string, pkg: string): string {
   const v = result.stdout?.toString().trim();
   if (!v) throw new Error(`Empty response from \`npm view ${pkg} version\``);
   return v;
+}
+
+/**
+ * Spawn a child process synchronously without ever falling back to
+ * `shell: true`. On Windows, npm ships as `npm.cmd` and Node refuses to
+ * `CreateProcess` a batch file directly, so we route through `cmd.exe` with
+ * the same quoting helpers `windowsSpawn.ts` uses for agent launches — that
+ * way an argument like `1.0.0 & rm -rf /` reaches npm as a single arg
+ * instead of getting parsed as a cmd.exe separator (Node DEP0190).
+ */
+function spawnSyncSafe(
+  file: string,
+  args: string[],
+  options: Omit<SpawnSyncOptionsWithBufferEncoding, "shell" | "windowsVerbatimArguments">
+) {
+  if (process.platform !== "win32" || !/\.(cmd|bat)$/i.test(file)) {
+    return spawnSync(file, args, { ...options, shell: false });
+  }
+  const { command, args: cmdArgs } = buildWindowsCmdInvocation(file, args);
+  return spawnSync(command, cmdArgs, {
+    ...options,
+    shell: false,
+    windowsVerbatimArguments: true
+  });
 }
 
 function pickLastCached(agentRoot: string, binName: string): null | { dir: string; binPath: string; version: string } {

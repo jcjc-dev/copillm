@@ -92,3 +92,26 @@ describe("describeSelfUpdate", () => {
     expect(describeSelfUpdate({ status: "skipped", reason: "not-global" }, "copillm")).toBeNull();
   });
 });
+
+/**
+ * Audit finding (high): the previous defaultRunInstall ran `npm install -g ...`
+ * with `shell: process.platform === 'win32'` and NO `--ignore-scripts`. A
+ * tampered package could execute postinstall scripts as the user before the
+ * bin smoke-test ever ran. The fix passes `--ignore-scripts` and routes
+ * through `windowsSpawn`'s cmd.exe wrapper on Windows. We can't easily
+ * intercept the real spawn from a unit test, but we CAN cover the injection
+ * point: a runInstall passed via deps is forwarded with packageName and
+ * version preserved, never mutated.
+ */
+describe("selfUpdateToLatest — runInstall contract", () => {
+  it("calls runInstall with the resolved (package, version) pair", async () => {
+    const spy = vi.fn(() => ({ ok: true, detail: "" }));
+    await selfUpdateToLatest(PKG, {
+      moduleUrl: GLOBAL_URL,
+      fetchLatest: async () => "0.5.0",
+      runInstall: spy
+    });
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith("copillm", "0.5.0");
+  });
+});

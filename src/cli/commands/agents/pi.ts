@@ -46,6 +46,11 @@ export function register(program: Command): void {
         }
         const bundle = buildPiEnvBundle(pi.outDir);
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_PI_VERSION ?? undefined;
+        const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
+          ? "cli"
+          : process.env.COPILLM_PI_VERSION
+            ? "env"
+            : undefined;
         const applyResult = applyAgentConfig({
           agent: "pi",
           cwd: process.cwd(),
@@ -62,7 +67,8 @@ export function register(program: Command): void {
           agent: "pi",
           args,
           env,
-          pinnedSpec
+          pinnedSpec,
+          pinnedSource
         });
         process.exit(exitCode);
       }

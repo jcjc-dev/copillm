@@ -42,6 +42,11 @@ export function register(program: Command): void {
           cacheId: launchAccount?.cacheId
         });
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CLAUDE_VERSION ?? undefined;
+        const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
+          ? "cli"
+          : process.env.COPILLM_CLAUDE_VERSION
+            ? "env"
+            : undefined;
         const conflicts = detectClaudeSettingsConflicts(claude.bundle.env);
         for (const line of formatSettingsConflictWarning(conflicts)) {
           process.stderr.write(`${line}\n`);
@@ -62,7 +67,8 @@ export function register(program: Command): void {
           agent: "claude",
           args,
           env,
-          pinnedSpec
+          pinnedSpec,
+          pinnedSource
         });
         process.exit(exitCode);
       }

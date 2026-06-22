@@ -44,6 +44,11 @@ export function register(program: Command): void {
           return;
         }
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_COPILOT_VERSION ?? undefined;
+        const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
+          ? "cli"
+          : process.env.COPILLM_COPILOT_VERSION
+            ? "env"
+            : undefined;
         const applyResult = applyAgentConfig({
           agent: "copilot",
           cwd: process.cwd(),
@@ -67,7 +72,8 @@ export function register(program: Command): void {
           agent: "copilot",
           args,
           env,
-          pinnedSpec
+          pinnedSpec,
+          pinnedSource
         });
         process.exit(exitCode);
       }

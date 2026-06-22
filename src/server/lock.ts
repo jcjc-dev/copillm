@@ -2,7 +2,7 @@ import fs from "node:fs";
 import { readFileSync } from "node:fs";
 import { getCopillmHome, lockPath, lockReadPath } from "../config/home.js";
 import type { LockFileData } from "../types/index.js";
-import { ensureSecureDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
+import { ensureSecureCopillmDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
 
 export class LockAlreadyRunningError extends Error {
   public constructor(public readonly lock: LockFileData) {
@@ -31,7 +31,7 @@ async function acquireLockWithRetry(
   alreadyRetried: boolean
 ): Promise<void> {
   const file = lockPath();
-  ensureSecureDirectory(getCopillmHome());
+  ensureSecureCopillmDirectory(getCopillmHome());
   const data: LockFileData = {
     pid: process.pid,
     port,

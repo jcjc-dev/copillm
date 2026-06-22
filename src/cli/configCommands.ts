@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Command } from "commander";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { getCopillmHome } from "../config/home.js";
-import { ensureSecureDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
+import { ensureSecureCopillmDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { loadConfig } from "../config/config.js";
 import { AgentConfigError, loadAgentConfig } from "../agentconfig/load.js";
 import { applyAgentConfig, formatApplyNotes } from "../agentconfig/apply.js";
@@ -52,7 +52,7 @@ export function registerConfigCommands(program: Command): void {
         process.stderr.write(`${target} already exists; pass --force to overwrite.\n`);
         process.exit(1);
       }
-      ensureSecureDirectory(path.dirname(target));
+      ensureSecureCopillmDirectory(path.dirname(target));
       writeFileSecureAtomic(target, SCAFFOLD_TOML, 0o600);
       process.stdout.write(`Scaffolded ${target}\n`);
     });

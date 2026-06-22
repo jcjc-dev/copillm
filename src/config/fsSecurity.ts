@@ -1,7 +1,35 @@
 import fs from "node:fs";
 import path from "node:path";
 
+/**
+ * Ensure a directory exists with secure (0o700) mode. ONLY chmods when this
+ * call had to create the directory — if the dir already existed at entry, we
+ * leave its mode untouched. Without this guard, the helper would silently
+ * strip group/other bits off the user's `$HOME` the first time native-claude
+ * sync writes into it (the renderer emits writes at `$HOME/.claude.json` and
+ * `$HOME/.claude/settings.json`, and a naive `chmod 0o700` of the dirname
+ * locks out other UIDs on shared-home setups).
+ *
+ * Callers that own the target path (everything under `~/.copillm`) should use
+ * `ensureSecureCopillmDirectory` instead — it tightens the mode even on
+ * pre-existing copillm-owned dirs, which is the original intent of this
+ * helper for the home tree.
+ */
 export function ensureSecureDirectory(dirPath: string): void {
+  const preExisting = fs.existsSync(dirPath);
+  if (!preExisting) {
+    fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
+    applyModeIfSupported(dirPath, 0o700);
+  }
+}
+
+/**
+ * Like `ensureSecureDirectory`, but always chmods to 0o700 — even when the
+ * directory already existed. Intended for paths copillm owns end to end
+ * (`~/.copillm` and its subtree); never use this on a path whose parent could
+ * be the user's home directory or any other shared location.
+ */
+export function ensureSecureCopillmDirectory(dirPath: string): void {
   if (!fs.existsSync(dirPath)) {
     fs.mkdirSync(dirPath, { recursive: true, mode: 0o700 });
   }
