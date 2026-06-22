@@ -1,4 +1,4 @@
-import { resolveAgent } from "./resolveAgent.js";
+import { resolveAgent, type PinSource } from "./resolveAgent.js";
 import { spawnAgent } from "./windowsSpawn.js";
 import { type AgentName } from "../integrations/registry.js";
 
@@ -7,6 +7,12 @@ export interface LaunchOptions {
   args: string[];
   env: Record<string, string>;
   pinnedSpec?: string;
+  /**
+   * Where the pin came from. `env` for COPILLM_*_VERSION values; `cli` for
+   * an explicit --copillm-use. Validates more strictly under "env" — an
+   * env-supplied pin must be a bare version string, never a `<pkg>@<ver>`.
+   */
+  pinnedSource?: PinSource;
   log?: (line: string) => void;
 }
 
@@ -17,6 +23,7 @@ export async function launchAgent(opts: LaunchOptions): Promise<number> {
   try {
     resolved = await resolveAgent(opts.agent, {
       pinnedSpec: opts.pinnedSpec,
+      pinnedSource: opts.pinnedSource,
       preferPath: useSystemAgentOptIn(),
       log
     });

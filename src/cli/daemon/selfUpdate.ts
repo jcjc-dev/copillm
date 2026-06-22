@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import type { PackageInfo } from "../../config/packageInfo.js";
 import { fetchLatestNpmVersion, isNewerVersion } from "../updateNotifier.js";
+import { buildWindowsCmdInvocation } from "../windowsSpawn.js";
 
 /**
  * Self-update support for `copillm restart`. Restart respawns the daemon from
@@ -91,13 +92,25 @@ export function describeSelfUpdate(result: SelfUpdateResult, packageName: string
 }
 
 function defaultRunInstall(packageName: string, version: string): { ok: boolean; detail: string } {
-  const isWindows = process.platform === "win32";
-  const result = spawnSync("npm", ["install", "-g", `${packageName}@${version}`], {
-    encoding: "utf8",
+  // Drop `shell: true` (Node DEP0190): on Windows we route `npm.cmd` through
+  // cmd.exe with `windowsVerbatimArguments` so the version string can never
+  // be reinterpreted as shell metacharacters. `--ignore-scripts` blocks
+  // preinstall/install/postinstall scripts so a hypothetical compromised npm
+  // mirror can't run code on the user before the smoke test catches an
+  // unusable package.
+  const args = ["install", "-g", "--ignore-scripts", `${packageName}@${version}`];
+  const baseOpts = {
+    encoding: "utf8" as const,
     timeout: 120_000,
-    stdio: ["ignore", "ignore", "pipe"],
-    shell: isWindows
-  });
+    stdio: ["ignore", "ignore", "pipe"] as ["ignore", "ignore", "pipe"]
+  };
+  const result =
+    process.platform === "win32"
+      ? (() => {
+          const { command, args: cmdArgs } = buildWindowsCmdInvocation("npm.cmd", args);
+          return spawnSync(command, cmdArgs, { ...baseOpts, shell: false, windowsVerbatimArguments: true });
+        })()
+      : spawnSync("npm", args, { ...baseOpts, shell: false });
   if (result.error) {
     return { ok: false, detail: result.error.message };
   }

@@ -4,7 +4,7 @@ import YAML from "yaml";
 import { z } from "zod";
 import type { AppConfig } from "../types/index.js";
 import { configPath, configReadPath, getCopillmHome } from "./home.js";
-import { ensureSecureDirectory, writeFileSecureAtomic } from "./fsSecurity.js";
+import { ensureSecureCopillmDirectory, writeFileSecureAtomic } from "./fsSecurity.js";
 
 const ConfigSchema = z.object({
   preferredPort: z.number().int().min(1).max(65535).default(4141),
@@ -21,7 +21,10 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 export function ensureAppHome(): void {
-  ensureSecureDirectory(getCopillmHome());
+  // copillm owns its home dir end-to-end, so tightening the mode on a
+  // pre-existing one is correct (and protects users whose ~/.copillm got
+  // mode-broadened by some unrelated tooling).
+  ensureSecureCopillmDirectory(getCopillmHome());
 }
 
 export function loadConfig(): AppConfig {

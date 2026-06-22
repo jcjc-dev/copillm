@@ -25,7 +25,7 @@ import { handleHealthz, handleLivez } from "./routes/health.js";
 import { handleModels } from "./routes/models.js";
 import { handleDebug } from "./routes/debug.js";
 import { handleProxyForward } from "./routes/proxyForward.js";
-import { isLocalRequest, resolveRoute, safePathname, type RequestRoute } from "./routes/shared.js";
+import { checkLoopbackOriginHeaders, isLocalRequest, resolveRoute, safePathname, type RequestRoute } from "./routes/shared.js";
 
 export async function startProxyServer(input: {
   port: number;
@@ -84,6 +84,29 @@ export async function startProxyServer(input: {
     try {
       if (!isLocalRequest(req)) {
         safeSendJson(res, 403, { error: "non_loopback_request_rejected" });
+        return;
+      }
+      // DNS-rebinding defence: even though the TCP peer is loopback, the
+      // request can still originate in a browser that resolved attacker.com
+      // to 127.0.0.1. Require the Host header to be one of the loopback
+      // names we listen on, and refuse any Origin that isn't same-origin.
+      // Applied to every route — `/livez` and `/healthz` included — so a
+      // malicious page can't even confirm the port the daemon is on.
+      const originCheck = checkLoopbackOriginHeaders(req, input.port);
+      if (!originCheck.ok) {
+        input.logger.warn(
+          {
+            event: "dns_rebinding_rejected",
+            request_id: requestId,
+            reason: originCheck.reason,
+            detail: originCheck.detail
+          },
+          "rejected request with non-loopback Host/Origin/Sec-Fetch-Site"
+        );
+        const status = originCheck.reason === "host_mismatch" ? 421 : 403;
+        const error =
+          originCheck.reason === "host_mismatch" ? "misdirected_request" : "cross_origin_rejected";
+        safeSendJson(res, status, { error });
         return;
       }
       const route = resolveRoute(req.method, req.url);

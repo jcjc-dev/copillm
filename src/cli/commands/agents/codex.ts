@@ -46,6 +46,11 @@ export function register(program: Command): void {
         }
         const bundle = buildCodexEnvBundle(codex.outDir);
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CODEX_VERSION ?? undefined;
+        const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
+          ? "cli"
+          : process.env.COPILLM_CODEX_VERSION
+            ? "env"
+            : undefined;
         const applyResult = applyAgentConfig({
           agent: "codex",
           cwd: process.cwd(),
@@ -63,7 +68,8 @@ export function register(program: Command): void {
           agent: "codex",
           args,
           env,
-          pinnedSpec
+          pinnedSpec,
+          pinnedSource
         });
         process.exit(exitCode);
       }
