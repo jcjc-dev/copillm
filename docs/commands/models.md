@@ -17,7 +17,7 @@ Fetch the live model catalogue from Copilot's `/models` endpoint for the configu
 copillm models list [--json]
 ```
 
-> **Multiple accounts.** Different accounts can be entitled to different Copilot models, so each account keeps its own catalogue. Named accounts cache into `~/.copillm/models.cache.<account>.json`, while the primary/legacy account (your original, pre-multi-account login) keeps the shared `~/.copillm/models.cache.json` shown above. Each account's cache follows its own storage identity, so switching the default never makes two accounts read each other's catalogue.
+> **Multiple accounts.** Different accounts can be entitled to different Copilot models, so each account keeps its own catalogue. Named accounts cache into `~/.copillm/models.cache.<account>.json`, while the primary account (your original, pre-multi-account login) keeps the shared `~/.copillm/models.cache.json` shown above. Each account reads only its own cache, so switching the default never makes two accounts see each other's catalogue.
 
 ## `copillm models select`
 

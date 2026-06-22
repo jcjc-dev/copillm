@@ -94,7 +94,8 @@ production `copillm`. Rebuild (`npm run build`) to pick up source changes.
 What `--dev` changes:
 
 - `COPILLM_HOME` → `~/.copillm-dev` (separate pid lock, `config.yaml`,
-  `models.cache.json`, `debug.log`, generated Codex/Copilot config).
+  `models.cache.json`, `debug.log`, and all generated agent config —
+  Codex, Claude, pi, and Copilot).
 - `COPILLM_PORT` → `4142` (still auto-increments if busy).
 - Override the locations with `COPILLM_DEV_HOME` / `COPILLM_DEV_PORT`. An
   explicitly-set `COPILLM_HOME` / `COPILLM_PORT` always wins.
@@ -134,7 +135,7 @@ Three workflows make up CI:
 | Workflow | Triggers | What it runs |
 |---|---|---|
 | **PR gate** (`pr-gate.yml`) | every PR + push to `main` + manual | lint + build + unit tests (`vitest`) + E2E PR-gate runner (mock backend + synthetic Codex/Claude clients hitting copillm with the real wire format and SSE shapes). 6-cell matrix: `ubuntu-latest` × `macos-latest` × `windows-latest` on Node 20 and 22. |
-| **Upstream e2e** (`upstream-e2e.yml`) | nightly cron at 09:00 UTC + manual + invoked by `release.yml` | everything in PR gate + E2E upstream runner that installs the latest [`@openai/codex`](https://www.npmjs.com/package/@openai/codex) and [`@anthropic-ai/claude-code`](https://www.npmjs.com/package/@anthropic-ai/claude-code) via `npx -y` and drives them through the mock-backed copillm stack. Same 6-cell matrix. |
+| **Upstream e2e** (`upstream-e2e.yml`) | nightly cron at 09:00 UTC + manual + invoked by `release.yml` | build + unit tests (`vitest`) + E2E PR-gate runner + E2E upstream runner that installs the latest [`@openai/codex`](https://www.npmjs.com/package/@openai/codex) and [`@anthropic-ai/claude-code`](https://www.npmjs.com/package/@anthropic-ai/claude-code) via `npx -y` and drives them through the mock-backed copillm stack. Same 6-cell matrix. (Lint runs in PR gate, not here.) |
 | **Release** (`release.yml`) | push to `main` that touches `package.json` + manual | detects a version bump, tags `v<version>`, invokes `upstream-e2e` as a gate, publishes to npm with provenance, then creates a GitHub Release with auto-generated notes. |
 
 The nightly `upstream-e2e` run is the canary: it catches `@openai/codex` / `@anthropic-ai/claude-code` shipping breaking changes against copillm without waiting for someone to cut a release. The same workflow doubles as the pre-publish gate inside `release.yml` (via `workflow_call`), so `npm publish` only runs after the full matrix passes.

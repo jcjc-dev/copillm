@@ -138,6 +138,8 @@ args = ["mcp", "ado"]
 
 Now `copillm codex --profile work` (or any launch with `work` active) routes at the `work` account. The value must name an account from `copillm auth status`. A launch's `--account` flag or the `COPILLM_ACCOUNT` env var still overrides the pin — the full precedence is `--account` > `COPILLM_ACCOUNT` > the profile's `account` > the default account.
 
+You can also set `account` under `[defaults]` to pin a baseline account for every profile; a profile's own `account` overrides the default.
+
 ## Environment variable expansion
 
 `${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `url`, `env` values, and `headers` values at load time:
@@ -188,7 +190,7 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ## Instructions block (bonus)
 
-Same file also fans out instructions to each agent (AGENTS.md / pi prompt) inside a `<!-- copillm:managed begin/end -->` marker so the rest of those files stays yours. **Not supported for Claude** — copillm never writes to `CLAUDE.md`; manage that file yourself.
+Same file also fans out instructions to Codex (`AGENTS.md`) and pi (its prompt file) inside a `<!-- copillm:managed begin/end -->` marker so the rest of those files stays yours. **Not supported for Claude or Copilot** — copillm never writes to `CLAUDE.md`; manage Claude guidance yourself.
 
 ```toml
 [profiles.default.instructions]
@@ -254,7 +256,7 @@ copillm: --yolo ignored for pi (pi has no blanket-approve flag; ...; source: pro
 
 ## Troubleshooting
 
-- **`Required env var "FOO" is not set`** — export it, or add `${FOO:-default}` in your TOML.
-- **`MCP server name "x" is not a valid TOML identifier`** — only `[A-Za-z0-9_-]+`. Rename it.
+- **`Required env var "FOO" is not set and no default was provided in the agent.toml expansion.`** — export it, or add `${FOO:-default}` in your TOML.
+- **`MCP server name "x" is not a valid TOML identifier; use only letters, digits, dashes, and underscores.`** — rename it to match `[A-Za-z0-9_-]+`.
 - **`Codex config not found at …`** — run `copillm start` (or `copillm codex` once) so the base `config.toml` exists, then re-sync.
 - **Nothing happens on launch** — neither `~/.copillm/agent.toml` nor `<cwd>/.copillm/agent.toml` exists. Run `copillm config init`.

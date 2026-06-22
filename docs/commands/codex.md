@@ -47,14 +47,14 @@ copillm --debug codex                # equivalent (global debug flag still works
 2. Resolves the Codex CLI binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_CODEX_VERSION` environment variable
    2. A cached install at `~/.copillm/bin/codex/<version>/`
-   3. A fresh install via `npm install --prefix ~/.copillm/bin/codex/<version>/ @openai/codex@latest`
+   3. A fresh install of the latest `@openai/codex` via `npm install` into `~/.copillm/bin/codex/<version>/`
 
-   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` to additionally consider a system `codex` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `codex` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
 3. Prints the resolved binary path and version, for example:
    ```text
-   → codex (cached, ~/.copillm/bin/codex/1.4.9/, v1.4.9)
+   → codex (cached, ~/.copillm/bin/codex/1.4.9, v1.4.9)
    ```
-4. Generates `~/.copillm/codex/config.toml` (unless `CODEX_HOME` is overridden) so Codex points its model provider at `http://127.0.0.1:4141/codex`.
+4. Generates `~/.copillm/codex/config.toml` and points Codex at it (via `CODEX_HOME`), so Codex sends requests to `http://127.0.0.1:4141/codex/v1`.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
 For details on Codex-specific configuration, see [Using with Codex CLI](../../codex/).
@@ -82,6 +82,6 @@ The launch is validated up front: an unknown, malformed, or not-logged-in accoun
 | --- | --- |
 | `COPILLM_CODEX_VERSION` | Pin a specific Codex CLI version. |
 | `COPILLM_ACCOUNT` | Account to launch against when `--account` is not passed. See [Account selection](#account-selection). |
-| `CODEX_HOME` | Override the directory used for Codex configuration. |
+| `CODEX_HOME` | Set by copillm when launching Codex, pointing it at the generated config under `~/.copillm/codex/`. |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |
