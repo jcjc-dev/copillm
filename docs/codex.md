@@ -30,7 +30,7 @@ export CODEX_HOME="/Users/you/.copillm/codex"
 
 ## Generated `config.toml`
 
-The auto-generated `~/.copillm/codex/config.toml` points Codex's model provider at `http://127.0.0.1:4141/codex` and enables live model discovery via the `/codex/v1/models` endpoint. You can override `CODEX_HOME` to point Codex at a different config location if you want to manage it yourself.
+The auto-generated `~/.copillm/codex/config.toml` points Codex's model provider at `http://127.0.0.1:4141/codex/v1` and enables live model discovery via the `/codex/v1/models` endpoint. You can override `CODEX_HOME` to point Codex at a different config location if you want to manage it yourself.
 
 To make the default Codex install use copillm without launching through `copillm codex`, run:
 

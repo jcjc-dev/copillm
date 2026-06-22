@@ -7,13 +7,13 @@ nav_order: 4
 
 # `copillm copilot`
 
-Launch GitHub Copilot CLI using copillm's stored GitHub OAuth token, so you do not have to run a second device-flow login for `gh copilot`.
+Launch GitHub Copilot CLI using copillm's stored GitHub OAuth token, so you do not have to run a second device-flow login for the Copilot CLI.
 
 ```bash
 copillm copilot [args...]
 ```
 
-Any arguments after `copilot` are forwarded verbatim to the underlying Copilot CLI:
+Any arguments after `copilot` other than copillm's own flags are forwarded to the underlying Copilot CLI:
 
 ```bash
 copillm copilot --help
@@ -23,7 +23,7 @@ copillm copilot suggest -t shell "list large files"
 ## What it does
 
 1. Reads the stored GitHub credential. If none is present, exits non-zero with `copillm: no stored GitHub credential — run `copillm auth login` first.`
-2. Resolves the Copilot CLI binary in the same order as the other agent launchers — pinned `--copillm-use`/`COPILLM_COPILOT_VERSION`, then a cached install at `~/.copillm/bin/copilot/<version>/`, then a fresh `npm install` of `@github/copilot`. Set `COPILLM_USE_SYSTEM_AGENT=1` to opt in to falling back to a system `copilot` on `PATH` (off by default).
+2. Resolves the Copilot CLI binary in the same order as the other agent launchers — pinned `--copillm-use`/`COPILLM_COPILOT_VERSION`, then a cached install at `~/.copillm/bin/copilot/<version>/`, then a fresh `npm install` of `@github/copilot`. Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to also consider a system `copilot` on `PATH` (checked before the cache when no version is pinned; off by default).
 3. Spawns the Copilot CLI with `COPILOT_GITHUB_TOKEN` injected into the child environment only. Copilot CLI honours this variable ahead of its own stored credentials, which short-circuits its device-flow login.
 4. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
@@ -56,4 +56,4 @@ Unlike the other launchers, `copillm copilot` does **not** start the proxy daemo
 | `COPILLM_COPILOT_VERSION` | Pin a specific Copilot CLI version. |
 | `COPILLM_ACCOUNT` | Account whose GitHub token to use when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PROFILE` | Default profile selection used when `--copillm-profile` is not passed. |
-| `COPILLM_YOLO` | Tri-state default for `--yolo` (`1`/`true`/`on` → enable; `0`/`false`/`off` → disable; unset → inherit `agent.toml`). |
+| `COPILLM_YOLO` | Tri-state default for `--yolo` (`1`/`true`/`yes` → enable; `0`/`false`/`no` → disable; unset → inherit `agent.toml`). |

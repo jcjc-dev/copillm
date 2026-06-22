@@ -85,7 +85,7 @@ print(msg.content[0].text)
 
 ## Error handling
 
-When an upstream Copilot API call fails, copillm forwards the upstream HTTP status code through to the caller and returns a sanitized error payload — agents see a real error code instead of a generic `502 proxy_error`. Auth tokens, headers, and request bodies are never echoed back in the response.
+When an upstream Copilot API call fails, copillm forwards the upstream HTTP status code through to the caller and returns a sanitized error payload — agents see a real error code instead of a generic `502`. Auth tokens, headers, and request bodies are never echoed back in the response.
 
 OpenAI-shaped routes (`/v1/chat/completions`, `/codex/v1/responses`) return:
 
@@ -94,7 +94,7 @@ OpenAI-shaped routes (`/v1/chat/completions`, `/codex/v1/responses`) return:
   "error": {
     "type": "upstream_rate_limited",
     "code": "rate_limit_exceeded",
-    "message": "upstream_rate_limited: rate_limit_exceeded: ...",
+    "message": "rate_limit_exceeded: ...",
     "upstream_status_code": 429,
     "request_id": "..."
   }
@@ -113,7 +113,12 @@ Anthropic-shaped routes (`/v1/messages`, `/anthropic/v1/messages`) return the sa
 | `upstream_request_error` | Upstream returned `4xx` (other than the above). |
 | `upstream_error` | Any other non-2xx response. |
 
-Transport-level failures *inside* the daemon (a panic, malformed upstream stream, or a daemon-side bug) still surface as `502` with `{ "error": "<kind>", "detail": "..." }`. If you see `proxy_error` from a coding-agent error message, that is the daemon itself failing, not Copilot upstream.
+Failures *inside* the daemon (rather than upstream) surface as a `5xx` with a `{ "error": "<kind>", "detail": "..." }` shape:
+
+- A malformed or missing upstream stream returns `502` with `"error": "invalid_upstream_response"`.
+- An unexpected daemon-side error returns `500` with `"error": "internal_error"`.
+
+If you see either of these in a coding-agent error message, the daemon itself failed — not Copilot upstream. Re-run with `copillm --debug start` to capture the interaction in `~/.copillm/debug.log`.
 
 ### Daemon-side request errors
 
@@ -134,4 +139,4 @@ copillm translates between OpenAI and Anthropic wire formats and Copilot's upstr
 - **Sampling parameters:** `temperature`, `top_p`, and `stop_sequences` on an Anthropic request are forwarded upstream (`stop_sequences` maps to OpenAI `stop`). `top_k` and `metadata` have no upstream equivalent and are dropped.
 - **OpenAI-to-Anthropic content parts:** model responses are text and tool-use only (responses never carry image parts).
 - **`tool_result` errors:** Anthropic `tool_result` blocks with `is_error: true` are translated into the OpenAI `tool` role (which has no `is_error` field) with the content prefixed by `[tool_error] ` so the assistant still sees that the tool failed. This lets coding agents recover from tool failures (e.g. a failed `Bash` invocation or MCP tool error) instead of the whole conversation 400ing.
-- **`[1m]` model id suffix:** Ids advertised on `/anthropic/v1/models` may carry a `[1m]` suffix when the upstream model reports `max_context_window_tokens >= 1_000_000`. The suffix is stripped back off before any request is forwarded upstream, so canonical model ids are always what Copilot sees. See [the Claude Code guide](../claude-code/#context-windows-and-the-1m-alias) for why.
+- **`[1m]` model id suffix:** Ids advertised on `/anthropic/v1/models` may carry a `[1m]` suffix when the model id contains `opus` **and** the upstream model reports `max_context_window_tokens >= 1_000_000`. The suffix is stripped back off before any request is forwarded upstream, so canonical model ids are always what Copilot sees. See [the Claude Code guide](../claude-code/#context-windows-and-the-1m-alias) for why.

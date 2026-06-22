@@ -7,7 +7,7 @@ nav_order: 1
 
 # `copillm auth`
 
-Authentication against GitHub Copilot uses the GitHub device flow. Credentials are stored in your OS keychain (Keychain on macOS, Credential Manager on Windows, libsecret on Linux); the token is never written to disk in plaintext and never printed to stdout or logs.
+Authentication against GitHub Copilot uses the GitHub device flow. Credentials are stored in your OS keychain when one is available (Keychain on macOS, Credential Manager on Windows, libsecret on Linux). When no keychain is available, copillm falls back to a `~/.copillm/credentials.json` file with `0600` permissions. Either way, the token is never printed to stdout or logs.
 
 copillm can hold **more than one GitHub account** at once and serve them all from the same daemon. If you only ever use one account, nothing below changes — you never name an account, no accounts index is created, and `auth login` / `logout` / `status` behave exactly as they always have. The multi-account surface only appears once you add a second account.
 

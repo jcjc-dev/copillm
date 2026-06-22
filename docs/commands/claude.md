@@ -47,12 +47,12 @@ copillm --debug claude               # equivalent (global debug flag still works
 2. Resolves the Claude Code binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_CLAUDE_VERSION` environment variable
    2. A cached install at `~/.copillm/bin/claude/<version>/`
-   3. A fresh install via `npm install --prefix ~/.copillm/bin/claude/<version>/ @anthropic-ai/claude-code@latest`
+   3. A fresh install of the latest `@anthropic-ai/claude-code` via `npm install` into `~/.copillm/bin/claude/<version>/`
 
-   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` to additionally consider a system `claude` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `claude` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
 3. Prints the resolved binary path and version, for example:
    ```text
-   → claude (cached, ~/.copillm/bin/claude/2.1.0/, v2.1.0)
+   → claude (cached, ~/.copillm/bin/claude/2.1.0, v2.1.0)
    ```
 4. Injects the environment variables Claude Code requires (`ANTHROPIC_BASE_URL`, the auth header, and related configuration).
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.

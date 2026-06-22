@@ -46,9 +46,9 @@ copillm --debug pi                   # copillm daemon diagnostics
 3. Resolves the pi binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_PI_VERSION` environment variable
    2. A cached install at `~/.copillm/bin/pi/<version>/`
-   3. A fresh install via `npm install --prefix ~/.copillm/bin/pi/<version>/ @earendil-works/pi-coding-agent@latest`
+   3. A fresh install of the latest `@earendil-works/pi-coding-agent` via `npm install` into `~/.copillm/bin/pi/<version>/`
 
-   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` to additionally consider a system `pi` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `pi` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
 4. Injects the environment variables pi requires to talk to the local daemon.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
