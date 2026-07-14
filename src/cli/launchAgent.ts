@@ -59,32 +59,50 @@ export async function launchAgent(opts: LaunchOptions): Promise<number> {
   });
 }
 
-function installHint(agent: AgentName): string {
+export function installHint(
+  agent: AgentName,
+  platform: NodeJS.Platform = process.platform
+): string {
+  const optIn = platform === "win32"
+    ? '    $env:COPILLM_USE_SYSTEM_AGENT = "1"'
+    : "    export COPILLM_USE_SYSTEM_AGENT=1";
+
   if (agent === "codex") {
-    return [
-      "Hint: install Codex CLI manually with one of:",
-      "    brew install codex",
+    const commands = [
       "    npm i -g @openai/codex",
       "    https://github.com/openai/codex/releases"
+    ];
+    if (platform === "darwin") commands.unshift("    brew install codex");
+    return [
+      "Fallback: install Codex CLI on PATH, then opt in to the system binary:",
+      ...commands,
+      optIn
     ].join("\n");
   }
   if (agent === "pi") {
     return [
-      "Hint: install pi coding agent manually with:",
-      "    npm i -g @earendil-works/pi-coding-agent"
+      "Fallback: install pi coding agent on PATH, then opt in to the system binary:",
+      "    npm i -g @earendil-works/pi-coding-agent",
+      optIn
     ].join("\n");
   }
   if (agent === "copilot") {
-    return [
-      "Hint: install GitHub Copilot CLI manually with one of:",
-      "    brew install --cask github-copilot-cli",
+    const commands = [
       "    npm i -g @github/copilot",
-      "    https://github.com/github/copilot-cli"
+      "    https://github.com/github/copilot-cli/releases"
+    ];
+    if (platform === "win32") commands.unshift("    winget install GitHub.Copilot");
+    if (platform === "darwin") commands.unshift("    brew install --cask copilot-cli");
+    return [
+      "Fallback: install GitHub Copilot CLI on PATH, then opt in to the system binary:",
+      ...commands,
+      optIn
     ].join("\n");
   }
   return [
-    "Hint: install Claude Code manually with:",
-    "    npm i -g @anthropic-ai/claude-code"
+    "Fallback: install Claude Code on PATH, then opt in to the system binary:",
+    "    npm i -g @anthropic-ai/claude-code",
+    optIn
   ].join("\n");
 }
 
