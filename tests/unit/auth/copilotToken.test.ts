@@ -28,6 +28,17 @@ function okResponse(): Response {
   });
 }
 
+function endpointResponse(api: string): Response {
+  return new Response(
+    JSON.stringify({
+      token: "bearer-xyz",
+      expires_at: VALID_FUTURE_EXP,
+      endpoints: { api }
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+}
+
 function statusResponse(status: number, body = ""): Response {
   return new Response(body, { status });
 }
@@ -232,6 +243,42 @@ describe("CopilotTokenManager — payload validation (preserved behaviour)", () 
     const badBody = new Response(JSON.stringify({ token: "" }), { status: 200 });
     const { manager } = makeManager([badBody]);
     await expect(manager.ensureToken()).rejects.toBeInstanceOf(CopilotTokenPayloadError);
+  });
+
+  describe("CopilotTokenManager — account endpoint detection", () => {
+    it("uses token-exchange endpoint metadata over a configured fallback", async () => {
+      const { manager } = makeManager([
+        endpointResponse("https://api.enterprise.githubcopilot.com")
+      ]);
+
+      await manager.ensureToken();
+
+      expect(manager.effectiveAccountType("business")).toBe("enterprise");
+      expect(manager.current?.detectedAccountType).toBe("enterprise");
+    });
+
+    it("keeps the configured type when endpoint metadata is absent or unknown", async () => {
+      const missing = makeManager([okResponse()]).manager;
+      await missing.ensureToken();
+      expect(missing.effectiveAccountType("business")).toBe("business");
+
+      const unknown = makeManager([endpointResponse("https://example.com")]).manager;
+      await unknown.ensureToken();
+      expect(unknown.effectiveAccountType("individual")).toBe("individual");
+    });
+
+    it("retains a valid detection when a later refresh omits endpoint metadata", async () => {
+      const { manager } = makeManager([
+        endpointResponse("https://api.enterprise.githubcopilot.com"),
+        okResponse()
+      ]);
+
+      await manager.ensureToken();
+      await manager.ensureToken(true);
+
+      expect(manager.effectiveAccountType("business")).toBe("enterprise");
+      expect(manager.current?.detectedAccountType).toBe("enterprise");
+    });
   });
 
   it("throws CopilotTokenPayloadError on non-finite expires_at", async () => {

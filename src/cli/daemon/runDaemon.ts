@@ -49,11 +49,12 @@ export async function runDaemon(options?: { debug?: boolean }): Promise<
   const defaultRecord = accountsIndex
     ? accountsIndex.accounts.find((account) => account.id === accountsIndex.defaultAccount) ?? null
     : null;
+  const configuredAccountType = defaultRecord?.accountType ?? config.accountType;
   const defaultAccount: ResolvedAccount = {
     accountId: defaultRecord?.id ?? null,
     githubToken: creds.token,
     tokenManager,
-    accountType: defaultRecord?.accountType ?? config.accountType,
+    accountType: tokenManager.effectiveAccountType(configuredAccountType),
     cacheId: defaultRecord && defaultRecord.storage === "namespaced" ? defaultRecord.id : undefined
   };
   const accountResolver = new DaemonAccountResolver({ default: defaultAccount });

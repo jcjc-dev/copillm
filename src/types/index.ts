@@ -23,5 +23,5 @@ export interface LockFileData {
 export interface TokenState {
   token: string;
   expiresAtUnix: number;
+  detectedAccountType?: AccountType;
 }
-
