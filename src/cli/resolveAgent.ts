@@ -3,7 +3,11 @@ import path from "node:path";
 import { spawnSync, type SpawnSyncOptionsWithBufferEncoding } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
 import { getCopillmHome } from "../config/home.js";
-import { type AgentName, AGENT_REGISTRY } from "../integrations/registry.js";
+import {
+  type AgentIntegration,
+  type AgentName,
+  AGENT_REGISTRY
+} from "../integrations/registry.js";
 import { buildWindowsCmdInvocation } from "./windowsSpawn.js";
 
 export type { AgentName };
@@ -144,11 +148,12 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const npmExe = opts.npmExecutable ?? defaultNpmExecutable();
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
 
+  const integration = AGENT_REGISTRY[agent];
   const pin = opts.pinnedSpec
     ? parsePinSpec(agent, opts.pinnedSpec, opts.pinnedSource ?? "cli")
-    : { packageName: AGENT_REGISTRY[agent].npmPackage, version: null };
+    : { packageName: integration.npmPackage, version: null };
   const pkg = pin.packageName;
-  const binName = AGENT_REGISTRY[agent].binName;
+  const binName = integration.binName;
   const agentRoot = path.join(cacheRoot, agent);
 
   // 1. PATH lookup (opt-in only).
@@ -188,7 +193,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
 
   // 3. Cache lookup
   if (target) {
-    const cached = findCachedVersion(agentRoot, target, binName);
+    const cached = findCachedVersion(agentRoot, target, integration);
     if (cached) {
       return {
         source: "cache",
@@ -203,7 +208,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   } else {
     // Either --offline or we couldn't reach npm to ask "what's latest?".
     // Use the newest known-good install on disk.
-    const last = pickLastCached(agentRoot, binName);
+    const last = pickLastCached(agentRoot, integration);
     if (last) {
       if (viewError) {
         log(`\u26a0 could not reach npm registry to check for updates (${viewError.message}); using cached ${binName} v${last.version}`);
@@ -241,7 +246,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   try {
     // Re-check after acquiring lock — another invocation may have just installed it.
     const finalDir = path.join(agentRoot, target);
-    const recheck = findCachedVersion(agentRoot, target, binName);
+    const recheck = findCachedVersion(agentRoot, target, integration);
     if (recheck) {
       return {
         source: "cache",
@@ -257,7 +262,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     // A markerless cache may predate the completion-marker contract. If its
     // binary still passes the same smoke test used after installation, adopt
     // it in place instead of deleting a potentially running Windows agent.
-    const unmarkedBin = findUnmarkedUsableBin(finalDir, binName);
+    const unmarkedBin = findUnmarkedUsableBin(finalDir, integration);
     if (unmarkedBin) {
       fs.writeFileSync(path.join(finalDir, "version.txt"), `${target}\n`);
       return {
@@ -289,12 +294,9 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     fs.mkdirSync(installDir, { recursive: true });
 
     const spec = `${pkg}@${target}`;
-    // `--ignore-scripts` blocks preinstall/install/postinstall lifecycle
-    // scripts. Even if the version validator above let a tampered version
-    // string through, a malicious package's postinstall script never runs
-    // before the bin smoke-test below catches an unusable package.
-    // Every supported agent publishes its bin via `bin` in package.json, so
-    // none of them rely on a postinstall step to land the executable.
+    // Lifecycle scripts stay disabled. Integrations that publish their native
+    // executable in an optional platform package declare its package prefix
+    // in the registry, allowing the resolver to use that binary directly.
     const installArgs = [
       "install",
       "--prefix",
@@ -302,6 +304,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       "--no-audit",
       "--no-fund",
       "--omit=dev",
+      "--include=optional",
       "--ignore-scripts",
       spec
     ];
@@ -314,7 +317,25 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       throw new Error(`npm install ${spec} failed (exit ${installResult.status})${msg}`);
     }
 
-    const installedBin = binPathInPrefix(installDir, binName);
+    const requiredNativePackage = declaredNativePackageName(installDir, integration);
+    const nativeBinaryPackagePrefix = integration.nativeBinaryPackagePrefix;
+    if (
+      requiredNativePackage &&
+      nativeBinaryPackagePrefix &&
+      !nativePlatformBinPath(
+        installDir,
+        nativeBinaryPackagePrefix,
+        integration.binName
+      )
+    ) {
+      cleanupFailedInstall(installDir);
+      throw new Error(
+        `Installed ${spec} did not include required native package ${requiredNativePackage}. ` +
+        "npm may have omitted optional dependencies."
+      );
+    }
+
+    const installedBin = installedBinPath(installDir, integration);
     if (!installedBin || !fs.existsSync(installedBin)) {
       cleanupFailedInstall(installDir);
       throw new Error(`Installed package did not produce a ${binName} bin at ${installDir}`);
@@ -353,8 +374,8 @@ function cleanupFailedInstall(dir: string): void {
   }
 }
 
-function findReadyCachedBin(dir: string, binName: string): null | string {
-  const bin = binPathInPrefix(dir, binName);
+function findReadyCachedBin(dir: string, integration: AgentIntegration): null | string {
+  const bin = installedBinPath(dir, integration);
   if (!bin || !fs.existsSync(bin)) return null;
   // version.txt is written LAST, after the smoke test passes. Missing
   // marker = partial/aborted install; do not treat as a cache hit.
@@ -362,9 +383,12 @@ function findReadyCachedBin(dir: string, binName: string): null | string {
   return bin;
 }
 
-function findUnmarkedUsableBin(dir: string, binName: string): null | string {
+function findUnmarkedUsableBin(
+  dir: string,
+  integration: AgentIntegration
+): null | string {
   if (readVersionMarker(dir) !== null) return null;
-  const bin = binPathInPrefix(dir, binName);
+  const bin = installedBinPath(dir, integration);
   if (!bin || !fs.existsSync(bin)) return null;
   return probeVersion(bin) === null ? null : bin;
 }
@@ -372,11 +396,11 @@ function findUnmarkedUsableBin(dir: string, binName: string): null | string {
 function findCachedVersion(
   agentRoot: string,
   version: string,
-  binName: string
+  integration: AgentIntegration
 ): null | { dir: string; binPath: string } {
   const canonicalDir = path.join(agentRoot, version);
   if (readVersionMarker(canonicalDir) === version) {
-    const canonicalBin = findReadyCachedBin(canonicalDir, binName);
+    const canonicalBin = findReadyCachedBin(canonicalDir, integration);
     if (canonicalBin) return { dir: canonicalDir, binPath: canonicalBin };
   }
   if (!fs.existsSync(agentRoot)) return null;
@@ -384,7 +408,7 @@ function findCachedVersion(
     if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === version) continue;
     const dir = path.join(agentRoot, entry.name);
     if (readVersionMarker(dir) !== version) continue;
-    const binPath = findReadyCachedBin(dir, binName);
+    const binPath = findReadyCachedBin(dir, integration);
     if (binPath) return { dir, binPath };
   }
   return null;
@@ -433,6 +457,109 @@ function binPathInPrefix(prefix: string, binName: string): null | string {
     if (fs.existsSync(c)) return c;
   }
   return null;
+}
+
+function installedBinPath(
+  prefix: string,
+  integration: AgentIntegration
+): null | string {
+  if (integration.nativeBinaryPackagePrefix) {
+    const nativeBin = nativePlatformBinPath(
+      prefix,
+      integration.nativeBinaryPackagePrefix,
+      integration.binName
+    );
+    if (nativeBin) return nativeBin;
+    if (declaredNativePackageName(prefix, integration)) return null;
+  }
+  return binPathInPrefix(prefix, integration.binName);
+}
+
+function nativePlatformBinPath(
+  prefix: string,
+  packagePrefix: string,
+  binName: string
+): null | string {
+  const platformKey = nativePlatformKey();
+  if (!platformKey) return null;
+  const packageName = `${packagePrefix}-${platformKey}`;
+  const packageDir = path.join(prefix, "node_modules", ...packageName.split("/"));
+  const binary = path.join(
+    packageDir,
+    process.platform === "win32" ? `${binName}.exe` : binName
+  );
+  return fs.existsSync(binary) ? binary : null;
+}
+
+function declaredNativePackageName(
+  prefix: string,
+  integration: AgentIntegration
+): null | string {
+  if (!integration.nativeBinaryPackagePrefix) return null;
+  const platformKey = nativePlatformKey();
+  if (!platformKey) return null;
+  const nativePackage = `${integration.nativeBinaryPackagePrefix}-${platformKey}`;
+  const wrapperPackagePath = path.join(
+    prefix,
+    "node_modules",
+    ...integration.npmPackage.split("/"),
+    "package.json"
+  );
+  try {
+    const wrapper = JSON.parse(fs.readFileSync(wrapperPackagePath, "utf8")) as {
+      optionalDependencies?: unknown;
+    };
+    if (
+      typeof wrapper.optionalDependencies === "object" &&
+      wrapper.optionalDependencies !== null &&
+      Object.hasOwn(wrapper.optionalDependencies, nativePackage)
+    ) {
+      return nativePackage;
+    }
+  } catch {
+    // A missing or malformed wrapper manifest is handled by the bin checks.
+  }
+  return null;
+}
+
+let cachedNativePlatformKey: undefined | null | string;
+
+function nativePlatformKey(): null | string {
+  if (cachedNativePlatformKey !== undefined) return cachedNativePlatformKey;
+  cachedNativePlatformKey = computeNativePlatformKey();
+  return cachedNativePlatformKey;
+}
+
+function computeNativePlatformKey(): null | string {
+  let architecture = process.arch;
+  if (process.platform === "darwin" && architecture === "x64" && isRosetta()) {
+    architecture = "arm64";
+  }
+  if (process.platform === "linux") {
+    return `linux-${architecture}${isMusl() ? "-musl" : ""}`;
+  }
+  if (process.platform === "android") {
+    return `linux-${architecture}-android`;
+  }
+  if (process.platform === "darwin" || process.platform === "win32") {
+    return `${process.platform}-${architecture}`;
+  }
+  return null;
+}
+
+function isMusl(): boolean {
+  const report = process.report?.getReport?.() as
+    | { header?: { glibcVersionRuntime?: string } }
+    | undefined;
+  return report !== undefined && report.header?.glibcVersionRuntime === undefined;
+}
+
+function isRosetta(): boolean {
+  const result = spawnSync("sysctl", ["-n", "sysctl.proc_translated"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  });
+  return result.status === 0 && result.stdout.trim() === "1";
 }
 
 function findOnPath(name: string): null | string {
@@ -510,7 +637,10 @@ function spawnSyncSafe(
   });
 }
 
-function pickLastCached(agentRoot: string, binName: string): null | { dir: string; binPath: string; version: string } {
+function pickLastCached(
+  agentRoot: string,
+  integration: AgentIntegration
+): null | { dir: string; binPath: string; version: string } {
   if (!fs.existsSync(agentRoot)) return null;
   const cached = fs
     .readdirSync(agentRoot, { withFileTypes: true })
@@ -523,7 +653,7 @@ function pickLastCached(agentRoot: string, binName: string): null | { dir: strin
     .sort((a, b) => compareVersionsDescending(a.version, b.version));
   for (const entry of cached) {
     const dir = entry.dir;
-    const bin = findReadyCachedBin(dir, binName);
+    const bin = findReadyCachedBin(dir, integration);
     if (bin) return { dir, binPath: bin, version: entry.version };
   }
   return null;
