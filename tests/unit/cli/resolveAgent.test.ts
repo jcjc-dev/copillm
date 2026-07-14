@@ -395,6 +395,7 @@ describe("resolveAgent (npm view fallback)", async () => {
  *   • spawns npm without `shell: true` (Windows routes through cmd.exe with
  *     safe quoting via `windowsSpawn`'s buildWindowsCmdInvocation)
  *   • passes `--ignore-scripts` to npm install
+ *   • resolves declared native platform packages without running postinstall
  *
  * We exercise the install code path with a fake npm shim that records its
  * argv into a file so we can assert the args without depending on real npm.
@@ -459,6 +460,65 @@ process.exit(0);
     return shPath;
   }
 
+  function nativeClaudeNpm(dir: string, includeNative = true): string {
+    fs.mkdirSync(dir, { recursive: true });
+    const jsPath = path.join(dir, "fake-native-claude-npm.cjs");
+    fs.writeFileSync(
+      jsPath,
+      `const fs = require('node:fs');
+const path = require('node:path');
+const argv = process.argv.slice(2);
+if (argv[0] === 'install') {
+  const prefix = argv[argv.indexOf('--prefix') + 1];
+  const shimDir = path.join(prefix, 'node_modules', '.bin');
+  fs.mkdirSync(shimDir, { recursive: true });
+  if (process.platform === 'win32') {
+    fs.writeFileSync(path.join(shimDir, 'claude.cmd'), '@exit /b 1\\r\\n');
+  } else {
+    fs.writeFileSync(path.join(shimDir, 'claude'), '#!/bin/sh\\nexit 1\\n', { mode: 0o755 });
+  }
+
+  const keys = process.platform === 'darwin'
+    ? ['darwin-x64', 'darwin-arm64']
+    : process.platform === 'linux'
+      ? ['linux-' + process.arch, 'linux-' + process.arch + '-musl']
+      : [process.platform + '-' + process.arch];
+  const wrapperDir = path.join(prefix, 'node_modules', '@anthropic-ai', 'claude-code');
+  fs.mkdirSync(wrapperDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(wrapperDir, 'package.json'),
+    JSON.stringify({
+      optionalDependencies: Object.fromEntries(
+        keys.map(key => ['@anthropic-ai/claude-code-' + key, '2.1.209'])
+      )
+    })
+  );
+  if (${JSON.stringify(includeNative)}) {
+    for (const key of keys) {
+      const pkgDir = path.join(prefix, 'node_modules', '@anthropic-ai', 'claude-code-' + key);
+      fs.mkdirSync(pkgDir, { recursive: true });
+      const nativeBin = path.join(pkgDir, process.platform === 'win32' ? 'claude.exe' : 'claude');
+      if (process.platform === 'win32') {
+        fs.copyFileSync(process.execPath, nativeBin);
+      } else {
+        fs.writeFileSync(nativeBin, '#!/bin/sh\\necho 2.1.209\\n', { mode: 0o755 });
+      }
+    }
+  }
+}
+process.exit(0);
+`
+    );
+    if (process.platform === "win32") {
+      const cmdPath = path.join(dir, "fake-native-claude-npm.cmd");
+      fs.writeFileSync(cmdPath, `@node "${jsPath}" %*\r\n`);
+      return cmdPath;
+    }
+    const shPath = path.join(dir, "fake-native-claude-npm");
+    fs.writeFileSync(shPath, `#!/bin/sh\nexec node "${jsPath}" "$@"\n`, { mode: 0o755 });
+    return shPath;
+  }
+
   it("passes --ignore-scripts to npm install", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-argv-"));
     try {
@@ -481,7 +541,7 @@ process.exit(0);
     }
   });
 
-  it("uses the canonical install args (prefix + no-audit + no-fund + omit=dev + ignore-scripts + spec)", async () => {
+  it("uses the canonical install args with optional deps and lifecycle scripts disabled", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-args-canonical-"));
     try {
       const argvLog = path.join(tmp, "npm-argv.jsonl");
@@ -500,10 +560,54 @@ process.exit(0);
       expect(installCall.filter((a) => a === "--no-audit")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--no-fund")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--omit=dev")).toHaveLength(1);
+      expect(installCall.filter((a) => a === "--include=optional")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--ignore-scripts")).toHaveLength(1);
       // The spec must end with @<version> (the fake npm view returned "1.2.3").
       const spec = installCall[installCall.length - 1];
       expect(spec).toBe("@openai/codex@1.2.3");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses a declared native platform package without running postinstall", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-native-claude-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const npmExecutable = nativeClaudeNpm(path.join(tmp, "fakenpm"));
+
+      const installed = await resolveAgent("claude", {
+        cacheRoot,
+        npmExecutable,
+        pinnedSpec: "2.1.209"
+      });
+
+      expect(installed.source).toBe("installed");
+      expect(installed.binPath).toContain(`${path.sep}@anthropic-ai${path.sep}claude-code-`);
+      expect(installed.binPath).not.toContain(`${path.sep}.bin${path.sep}`);
+
+      const cached = await resolveAgent("claude", {
+        cacheRoot,
+        pinnedSpec: "2.1.209",
+        offline: true
+      });
+      expect(cached.source).toBe("cache");
+      expect(cached.binPath).toBe(installed.binPath);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("reports when npm omits a declared native platform package", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-missing-native-"));
+    try {
+      await expect(
+        resolveAgent("claude", {
+          cacheRoot: path.join(tmp, "cache"),
+          npmExecutable: nativeClaudeNpm(path.join(tmp, "fakenpm"), false),
+          pinnedSpec: "2.1.209"
+        })
+      ).rejects.toThrow(/did not include required native package @anthropic-ai\/claude-code-/);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
