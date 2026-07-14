@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -282,6 +283,27 @@ describe("resolveAgent (cache readiness)", async () => {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
+
+  it("adopts a markerless cache when its binary still passes the install smoke test", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-adopt-unmarked-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const expectedBin = seedCachedBin(cacheRoot, "codex", "1.2.3", { withMarker: false });
+      const result = await resolveAgent("codex", {
+        cacheRoot,
+        pinnedSpec: "1.2.3",
+        npmExecutable: path.join(tmp, "npm-must-not-run")
+      });
+
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(expectedBin);
+      expect(fs.readFileSync(path.join(cacheRoot, "codex", "1.2.3", "version.txt"), "utf8")).toBe(
+        "1.2.3\n"
+      );
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 });
 
 // Registry-unreachable fallback: if `npm view <pkg> version` fails (network
@@ -484,6 +506,84 @@ process.exit(0);
       expect(spec).toBe("@openai/codex@1.2.3");
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("does not prune older cached versions on Windows", async () => {
+    if (process.platform !== "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-no-win-prune-"));
+    try {
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog);
+      const cacheRoot = path.join(tmp, "cache");
+      const oldDir = path.join(cacheRoot, "codex", "1.0.0");
+      const oldBinDir = path.join(oldDir, "node_modules", ".bin");
+      fs.mkdirSync(oldBinDir, { recursive: true });
+      fs.writeFileSync(path.join(oldBinDir, "codex.cmd"), "@echo 1.0.0\r\n");
+      fs.writeFileSync(path.join(oldDir, "version.txt"), "1.0.0\n");
+
+      const result = await resolveAgent("codex", {
+        cacheRoot,
+        npmExecutable: npmExe,
+        pinnedSpec: "2.0.0"
+      });
+
+      expect(result.source).toBe("installed");
+      expect(result.prunedCount).toBe(0);
+      expect(fs.existsSync(path.join(oldBinDir, "codex.cmd"))).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("repairs a Windows cache held by a running agent without stopping it", async () => {
+    if (process.platform !== "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-win-repair-"));
+    let lockedProcess: ReturnType<typeof spawn> | undefined;
+    try {
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog);
+      const cacheRoot = path.join(tmp, "cache");
+      const finalDir = path.join(cacheRoot, "codex", "1.2.3");
+      const lockedExe = path.join(finalDir, "node_modules", "locked-node.exe");
+      fs.mkdirSync(path.dirname(lockedExe), { recursive: true });
+      fs.copyFileSync(process.execPath, lockedExe);
+      fs.writeFileSync(path.join(finalDir, "version.txt"), "1.2.3\n");
+
+      lockedProcess = spawn(lockedExe, ["-e", "setInterval(() => {}, 1000)"], {
+        stdio: "ignore"
+      });
+      await new Promise<void>((resolve, reject) => {
+        lockedProcess?.once("spawn", resolve);
+        lockedProcess?.once("error", reject);
+      });
+
+      const logs: string[] = [];
+      const result = await resolveAgent("codex", {
+        cacheRoot,
+        npmExecutable: npmExe,
+        pinnedSpec: "1.2.3",
+        log: (line) => logs.push(line)
+      });
+
+      expect(result.source).toBe("installed");
+      expect(result.cacheDir).not.toBe(finalDir);
+      expect(path.basename(result.cacheDir ?? "")).toMatch(/^1\.2\.3\.repair-/);
+      expect(logs.some((line) => /in use by another Windows process/.test(line))).toBe(true);
+
+      const cached = await resolveAgent("codex", {
+        cacheRoot,
+        pinnedSpec: "1.2.3",
+        offline: true
+      });
+      expect(cached.source).toBe("cache");
+      expect(cached.cacheDir).toBe(result.cacheDir);
+    } finally {
+      if (lockedProcess && lockedProcess.exitCode === null) {
+        lockedProcess.kill();
+        await new Promise<void>((resolve) => lockedProcess?.once("exit", () => resolve()));
+      }
+      fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
 });

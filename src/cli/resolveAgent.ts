@@ -188,17 +188,16 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
 
   // 3. Cache lookup
   if (target) {
-    const cachedDir = path.join(agentRoot, target);
-    const cachedBin = findReadyCachedBin(cachedDir, binName);
-    if (cachedBin) {
+    const cached = findCachedVersion(agentRoot, target, binName);
+    if (cached) {
       return {
         source: "cache",
-        binPath: cachedBin,
+        binPath: cached.binPath,
         version: target,
         packageName: pkg,
-        cacheDir: cachedDir,
+        cacheDir: cached.dir,
         prunedCount: 0,
-        displayLine: `\u2192 ${binName} (cached, ${displayPath(cachedDir)}, v${target})`
+        displayLine: `\u2192 ${binName} (cached, ${displayPath(cached.dir)}, v${target})`
       };
     }
   } else {
@@ -229,14 +228,11 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     throw new Error(`${binName}@${target} not in cache and --offline is set.`);
   }
 
-  // 4. Install. We install *directly* into the canonical version directory
-  // and write `version.txt` LAST as the "install complete" marker.
-  // findReadyCachedBin requires both the bin and the marker, so any crash
-  // before the marker is written leaves the tree visible as incomplete and
-  // the next run cleans it up + re-installs. Avoids the older staging+rename
-  // pattern, which had to retry rename-of-directory on Windows when AV or
-  // npm post-install workers transiently held handles on freshly-written
-  // files.
+  // 4. Install. We normally install directly into the canonical version
+  // directory and write `version.txt` LAST as the completion marker. If an
+  // already-corrupted Windows cache is still held open by a running agent,
+  // install a complete replacement beside it instead of requiring the user
+  // to stop that process.
   log(`\u2192 ${binName} (installing ${pkg}@${target} into ${displayPath(agentRoot)} \u2026)`);
   fs.mkdirSync(agentRoot, { recursive: true });
 
@@ -245,11 +241,28 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   try {
     // Re-check after acquiring lock — another invocation may have just installed it.
     const finalDir = path.join(agentRoot, target);
-    const recheckBin = findReadyCachedBin(finalDir, binName);
-    if (recheckBin) {
+    const recheck = findCachedVersion(agentRoot, target, binName);
+    if (recheck) {
       return {
         source: "cache",
-        binPath: recheckBin,
+        binPath: recheck.binPath,
+        version: target,
+        packageName: pkg,
+        cacheDir: recheck.dir,
+        prunedCount: 0,
+        displayLine: `\u2192 ${binName} (cached, ${displayPath(recheck.dir)}, v${target})`
+      };
+    }
+
+    // A markerless cache may predate the completion-marker contract. If its
+    // binary still passes the same smoke test used after installation, adopt
+    // it in place instead of deleting a potentially running Windows agent.
+    const unmarkedBin = findUnmarkedUsableBin(finalDir, binName);
+    if (unmarkedBin) {
+      fs.writeFileSync(path.join(finalDir, "version.txt"), `${target}\n`);
+      return {
+        source: "cache",
+        binPath: unmarkedBin,
         version: target,
         packageName: pkg,
         cacheDir: finalDir,
@@ -260,10 +273,20 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
 
     // Wipe any partial state (missing marker means a previous attempt was
     // interrupted) before we re-run npm into the same prefix.
+    let installDir = finalDir;
     if (fs.existsSync(finalDir)) {
-      fs.rmSync(finalDir, { recursive: true, force: true });
+      try {
+        fs.rmSync(finalDir, { recursive: true, force: true });
+      } catch (error) {
+        if (!isWindowsCacheInUseError(error)) throw error;
+        installDir = fs.mkdtempSync(path.join(agentRoot, `${target}.repair-`));
+        log(
+          `\u26a0 ${binName} v${target} cache is in use by another Windows process; ` +
+          `installing a replacement at ${displayPath(installDir)}`
+        );
+      }
     }
-    fs.mkdirSync(finalDir, { recursive: true });
+    fs.mkdirSync(installDir, { recursive: true });
 
     const spec = `${pkg}@${target}`;
     // `--ignore-scripts` blocks preinstall/install/postinstall lifecycle
@@ -275,7 +298,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     const installArgs = [
       "install",
       "--prefix",
-      finalDir,
+      installDir,
       "--no-audit",
       "--no-fund",
       "--omit=dev",
@@ -286,34 +309,34 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       stdio: ["ignore", "inherit", "inherit"]
     });
     if (installResult.status !== 0) {
-      cleanupFailedInstall(finalDir);
+      cleanupFailedInstall(installDir);
       const msg = installResult.error ? `: ${installResult.error.message}` : "";
       throw new Error(`npm install ${spec} failed (exit ${installResult.status})${msg}`);
     }
 
-    const installedBin = binPathInPrefix(finalDir, binName);
+    const installedBin = binPathInPrefix(installDir, binName);
     if (!installedBin || !fs.existsSync(installedBin)) {
-      cleanupFailedInstall(finalDir);
-      throw new Error(`Installed package did not produce a ${binName} bin at ${finalDir}`);
+      cleanupFailedInstall(installDir);
+      throw new Error(`Installed package did not produce a ${binName} bin at ${installDir}`);
     }
     if (probeVersion(installedBin) === null) {
-      cleanupFailedInstall(finalDir);
+      cleanupFailedInstall(installDir);
       throw new Error(`Smoke test failed: ${installedBin} --version did not exit 0`);
     }
 
     // Marker file: MUST be the last write. Cache-hit checks key off this.
-    fs.writeFileSync(path.join(finalDir, "version.txt"), `${target}\n`);
+    fs.writeFileSync(path.join(installDir, "version.txt"), `${target}\n`);
 
-    const pruned = pruneSiblings(agentRoot, target);
+    const pruned = pruneSiblings(agentRoot, installDir);
 
     return {
       source: "installed",
       binPath: installedBin,
       version: target,
       packageName: pkg,
-      cacheDir: finalDir,
+      cacheDir: installDir,
       prunedCount: pruned,
-      displayLine: `\u2192 ${binName} (installed ${pkg}@${target} \u2192 ${displayPath(finalDir)}${pruned > 0 ? `, pruned ${pruned} older version${pruned === 1 ? "" : "s"}` : ""})`
+      displayLine: `\u2192 ${binName} (installed ${pkg}@${target} \u2192 ${displayPath(installDir)}${pruned > 0 ? `, pruned ${pruned} older version${pruned === 1 ? "" : "s"}` : ""})`
     };
   } finally {
     releaseFileLock(lockFile);
@@ -337,6 +360,49 @@ function findReadyCachedBin(dir: string, binName: string): null | string {
   // marker = partial/aborted install; do not treat as a cache hit.
   if (!fs.existsSync(path.join(dir, "version.txt"))) return null;
   return bin;
+}
+
+function findUnmarkedUsableBin(dir: string, binName: string): null | string {
+  if (readVersionMarker(dir) !== null) return null;
+  const bin = binPathInPrefix(dir, binName);
+  if (!bin || !fs.existsSync(bin)) return null;
+  return probeVersion(bin) === null ? null : bin;
+}
+
+function findCachedVersion(
+  agentRoot: string,
+  version: string,
+  binName: string
+): null | { dir: string; binPath: string } {
+  const canonicalDir = path.join(agentRoot, version);
+  if (readVersionMarker(canonicalDir) === version) {
+    const canonicalBin = findReadyCachedBin(canonicalDir, binName);
+    if (canonicalBin) return { dir: canonicalDir, binPath: canonicalBin };
+  }
+  if (!fs.existsSync(agentRoot)) return null;
+  for (const entry of fs.readdirSync(agentRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === version) continue;
+    const dir = path.join(agentRoot, entry.name);
+    if (readVersionMarker(dir) !== version) continue;
+    const binPath = findReadyCachedBin(dir, binName);
+    if (binPath) return { dir, binPath };
+  }
+  return null;
+}
+
+function readVersionMarker(dir: string): null | string {
+  try {
+    const version = fs.readFileSync(path.join(dir, "version.txt"), "utf8").trim();
+    return version.length > 0 ? version : null;
+  } catch {
+    return null;
+  }
+}
+
+function isWindowsCacheInUseError(error: unknown): boolean {
+  if (process.platform !== "win32") return false;
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "ENOTEMPTY";
 }
 
 function defaultNpmExecutable(): string {
@@ -446,15 +512,19 @@ function spawnSyncSafe(
 
 function pickLastCached(agentRoot: string, binName: string): null | { dir: string; binPath: string; version: string } {
   if (!fs.existsSync(agentRoot)) return null;
-  const versions = fs
+  const cached = fs
     .readdirSync(agentRoot, { withFileTypes: true })
     .filter((e) => e.isDirectory() && !e.name.startsWith("."))
-    .map((e) => e.name)
-    .sort((a, b) => compareVersionsDescending(a, b));
-  for (const v of versions) {
-    const dir = path.join(agentRoot, v);
+    .map((e) => {
+      const dir = path.join(agentRoot, e.name);
+      return { dir, version: readVersionMarker(dir) };
+    })
+    .filter((entry): entry is { dir: string; version: string } => entry.version !== null)
+    .sort((a, b) => compareVersionsDescending(a.version, b.version));
+  for (const entry of cached) {
+    const dir = entry.dir;
     const bin = findReadyCachedBin(dir, binName);
-    if (bin) return { dir, binPath: bin, version: v };
+    if (bin) return { dir, binPath: bin, version: entry.version };
   }
   return null;
 }
@@ -471,15 +541,16 @@ function compareVersionsDescending(a: string, b: string): number {
   return b.localeCompare(a);
 }
 
-function pruneSiblings(agentRoot: string, keepVersion: string): number {
+function pruneSiblings(agentRoot: string, keepDir: string): number {
   let pruned = 0;
   const oneHourMs = 60 * 60 * 1000;
   const now = Date.now();
   for (const entry of fs.readdirSync(agentRoot, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    if (entry.name === keepVersion) continue;
     const sub = path.join(agentRoot, entry.name);
-    if (entry.name.startsWith(".staging-")) {
+    if (sub === keepDir) continue;
+    const isOrphanedRepair = entry.name.includes(".repair-") && readVersionMarker(sub) === null;
+    if (entry.name.startsWith(".staging-") || isOrphanedRepair) {
       try {
         const mtime = fs.statSync(sub).mtimeMs;
         if (now - mtime > oneHourMs) {
@@ -490,6 +561,10 @@ function pruneSiblings(agentRoot: string, keepVersion: string): number {
       }
       continue;
     }
+    // Windows does not allow deleting a running executable. Recursive
+    // deletion can remove most of an active agent version before failing at
+    // the locked .exe, corrupting that cache for the next launch.
+    if (process.platform === "win32") continue;
     if (entry.name.startsWith(".")) continue;
     try {
       fs.rmSync(sub, { recursive: true, force: true });
