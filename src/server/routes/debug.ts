@@ -54,7 +54,7 @@ export async function handleDebug(
       version: input.packageVersion ?? null,
       started_at_iso: DAEMON_STARTED_AT_ISO,
       uptime_seconds: uptimeSeconds,
-      account_type: input.config.accountType,
+      account_type: input.tokenManager.effectiveAccountType(input.config.accountType),
       selected_models: input.config.selectedModels,
       require_caller_secret: input.config.requireCallerSecret,
       log_level: input.logger.level,

@@ -126,7 +126,8 @@ async function postWithCurrentBearer(
   signal?: AbortSignal
 ): Promise<Response> {
   const bearer = await tokenManager.ensureToken({ forceRefresh });
-  return fetch(`${accountBaseUrl(accountType)}${upstreamPath}`, {
+  const effectiveAccountType = tokenManager.effectiveAccountType(accountType);
+  return fetch(`${accountBaseUrl(effectiveAccountType)}${upstreamPath}`, {
     method: "POST",
     headers: {
       ...COPILOT_HEADERS,

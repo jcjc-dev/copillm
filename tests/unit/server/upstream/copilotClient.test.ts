@@ -38,11 +38,13 @@ function makeTokenManager(initialBearer: string, refreshedBearer: string): { tm:
 
 type UpstreamAction = { kind: "respond"; status: number; body?: string } | { kind: "throw"; error: unknown };
 
-function stubUpstream(actions: UpstreamAction[]): { calls: Array<{ authorization: string | null }> } {
-  const calls: Array<{ authorization: string | null }> = [];
+function stubUpstream(actions: UpstreamAction[]): {
+  calls: Array<{ authorization: string | null; url: string }>;
+} {
+  const calls: Array<{ authorization: string | null; url: string }> = [];
   let i = 0;
-  const mock = (async (_url: unknown, init?: { headers?: Record<string, string> }) => {
-    calls.push({ authorization: init?.headers?.Authorization ?? null });
+  const mock = (async (url: unknown, init?: { headers?: Record<string, string> }) => {
+    calls.push({ authorization: init?.headers?.Authorization ?? null, url: String(url) });
     const action = actions[Math.min(i, actions.length - 1)];
     i += 1;
     if (action.kind === "throw") {
@@ -151,5 +153,30 @@ describe("postToCopilot", () => {
 
     await expect(call(tm, AbortSignal.abort())).rejects.toThrow();
     expect(calls).toHaveLength(0);
+  });
+
+  it("routes inference through the account type detected during token exchange", async () => {
+    const { tm } = makeTokenManager("bearer-v1", "bearer-v2");
+    (tm as unknown as {
+      state: { token: string; expiresAtUnix: number; detectedAccountType: "enterprise" };
+    }).state = {
+      token: "bearer-v1",
+      expiresAtUnix: Math.floor(Date.now() / 1000) + 3600,
+      detectedAccountType: "enterprise"
+    };
+    const { calls } = stubUpstream([{ kind: "respond", status: 200 }]);
+
+    await postToCopilot({
+      tokenManager: tm,
+      accountType: "business",
+      body: { model: "gpt-test", messages: [] },
+      requestId: "req-detected-endpoint",
+      logger,
+      upstreamPath: "/chat/completions"
+    });
+
+    expect(calls[0]?.url).toBe(
+      "https://api.enterprise.githubcopilot.com/chat/completions"
+    );
   });
 });

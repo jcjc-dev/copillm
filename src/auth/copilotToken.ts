@@ -1,12 +1,15 @@
 import { setTimeout as defaultSleep } from "node:timers/promises";
 
-import type { TokenState } from "../types/index.js";
-import { tokenExchangeUrl } from "../config/upstream.js";
+import type { AccountType, TokenState } from "../types/index.js";
+import { accountTypeFromCopilotApiUrl, tokenExchangeUrl } from "../config/upstream.js";
 import { isRetryableStatus, isRetryableTransportError, retryDelayMs } from "../server/upstream/retryPolicy.js";
 
 interface TokenExchangeResponse {
   token: string;
   expires_at: number;
+  endpoints?: {
+    api?: unknown;
+  };
 }
 
 interface EnsureTokenOptions {
@@ -112,6 +115,10 @@ export class CopilotTokenManager {
     return Math.max(0, this.state.expiresAtUnix - nowUnix);
   }
 
+  public effectiveAccountType(fallback: AccountType): AccountType {
+    return this.state?.detectedAccountType ?? fallback;
+  }
+
   public shouldRefresh(options?: { nowUnix?: number; refreshThresholdSeconds?: number }): boolean {
     const threshold = options?.refreshThresholdSeconds ?? DEFAULT_REFRESH_THRESHOLD_SECONDS;
     const expiresIn = this.expiresInSeconds(options?.nowUnix ?? this.nowUnix());
@@ -183,9 +190,13 @@ export class CopilotTokenManager {
         if (ttl <= MIN_ACCEPTABLE_TTL_SECONDS) {
           throw new CopilotTokenExpiredError(`Received near-expired Copilot token (ttl_seconds=${Math.max(0, ttl)}).`);
         }
+        const detectedAccountType =
+          accountTypeFromCopilotApiUrl(payload.endpoints?.api) ??
+          this.state?.detectedAccountType;
         return {
           token: payload.token,
-          expiresAtUnix: payload.expires_at
+          expiresAtUnix: payload.expires_at,
+          detectedAccountType
         };
       }
 

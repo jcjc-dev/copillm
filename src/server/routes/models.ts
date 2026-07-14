@@ -15,14 +15,15 @@ export async function handleModels(
 ): Promise<void> {
   try {
     await account.tokenManager.ensureToken(false);
+    const accountType = account.tokenManager.effectiveAccountType(account.accountType);
     if (!account.githubToken) {
       safeSendJson(res, 503, { error: "github_token_unavailable" });
       return;
     }
     const result =
       routeKind === "codex_models" || routeKind === "anthropic_models"
-        ? await listModelsUnion(account.accountType, account.githubToken, 3, undefined, account.cacheId)
-        : await listModels(account.accountType, account.githubToken, undefined, account.cacheId);
+        ? await listModelsUnion(accountType, account.githubToken, 3, undefined, account.cacheId)
+        : await listModels(accountType, account.githubToken, undefined, account.cacheId);
     if (routeKind === "codex_models") {
       safeSendJson(res, 200, buildCodexCatalog(result.models));
       return;
