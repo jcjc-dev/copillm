@@ -57,6 +57,7 @@ describe("buildClaudeEnvBundle", () => {
     process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
     delete process.env.CLAUDE_CONFIG_DIR;
     try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
       const bundle = buildClaudeEnvBundle({
         port: 4141,
         callerSecret: null,
@@ -65,7 +66,7 @@ describe("buildClaudeEnvBundle", () => {
         profileName: "personal"
       });
       expect(bundle.env.CLAUDE_CONFIG_DIR).toBe(
-        path.join(path.sep, "tmp", "copillm-profile-home", "profiles", "personal", "claude", "home")
+        path.join(expectedHome, "profiles", "personal", "claude", "home")
       );
     } finally {
       if (savedHome === undefined) delete process.env.COPILLM_HOME;
@@ -125,9 +126,10 @@ describe("buildPiEnvBundle", () => {
     process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
     delete process.env.PI_CODING_AGENT_DIR;
     try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
       const bundle = buildPiEnvBundle("/tmp/pi", "isolated", "personal");
       expect(bundle.env.PI_CODING_AGENT_DIR).toBe(
-        path.join(path.sep, "tmp", "copillm-profile-home", "profiles", "personal", "pi", "agent")
+        path.join(expectedHome, "profiles", "personal", "pi", "agent")
       );
     } finally {
       if (savedHome === undefined) delete process.env.COPILLM_HOME;
@@ -149,15 +151,9 @@ describe("buildCopilotEnvOverlay", () => {
     process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
     delete process.env.COPILOT_HOME;
     try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
       expect(buildCopilotEnvOverlay("isolated", "personal")).toEqual({
-        COPILOT_HOME: path.join(
-          path.sep,
-          "tmp",
-          "copillm-profile-home",
-          "profiles",
-          "personal",
-          "copilot"
-        )
+        COPILOT_HOME: path.join(expectedHome, "profiles", "personal", "copilot")
       });
     } finally {
       if (savedHome === undefined) delete process.env.COPILLM_HOME;
