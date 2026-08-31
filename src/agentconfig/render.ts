@@ -4,7 +4,13 @@ import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { AgentConfigError, type LoadResult } from "./load.js";
 import type { McpServerEntry, ResolvedProfile, YoloConfig } from "./schema.js";
-import { getCopillmHome, piAgentDir } from "../config/home.js";
+import {
+  claudeMcpConfigPath,
+  copilotHomeDir,
+  getCopillmHome,
+  piAgentDir,
+  type AgentSessionScope
+} from "../config/home.js";
 import {
   HASH_COMMENT,
   HTML_COMMENT,
@@ -29,6 +35,10 @@ export interface RenderInput {
   resolved: ResolvedProfile;
   /** cwd at the moment `copillm <agent>` was invoked. */
   cwd: string;
+  /** Active profile name used to namespace isolated agent state. */
+  profileName?: string;
+  /** Resolved shared/isolated state policy. */
+  sessionScope?: AgentSessionScope;
 }
 
 export interface CodexRenderInput extends RenderInput {
@@ -228,8 +238,7 @@ export function renderClaude(input: ClaudeRenderInput): RenderResult {
     return { writes, envOverlay: {}, cliArgs, notes };
   }
 
-  const claudeDir = path.join(getCopillmHome(), "claude");
-  const mcpJsonPath = path.join(claudeDir, "mcp.json");
+  const mcpJsonPath = claudeMcpConfigPath(input.sessionScope, input.profileName);
 
   const serverCount = Object.keys(input.resolved.mcpServers).length;
   if (serverCount > 0) {
@@ -376,7 +385,7 @@ export function renderPi(input: RenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
 
-  const piAgent = piAgentDir();
+  const piAgent = piAgentDir(input.sessionScope, input.profileName);
   const extensionDir = path.join(piAgent, "extensions", PI_EXTENSION_DIRNAME);
 
   // 1. servers.json — the resolved server list the extension reads at startup.
@@ -486,7 +495,10 @@ export function renderCopilot(input: RenderInput): RenderResult {
   const notes: string[] = [];
   const cliArgs: string[] = [];
 
-  const mcpConfigPath = path.join(getCopillmHome(), "copilot", "mcp-config.json");
+  const mcpConfigPath = path.join(
+    copilotHomeDir(input.sessionScope, input.profileName),
+    "mcp-config.json"
+  );
   const serverCount = Object.keys(input.resolved.mcpServers).length;
   if (serverCount > 0) {
     const content = renderCopilotMcp(input.resolved.mcpServers);
@@ -567,7 +579,12 @@ export interface ApplyResult {
 }
 
 export function planRender(opts: ApplyOptions, load: LoadResult): RenderResult {
-  const baseInput: RenderInput = { resolved: load.resolved, cwd: opts.cwd };
+  const baseInput: RenderInput = {
+    resolved: load.resolved,
+    cwd: opts.cwd,
+    profileName: load.active,
+    sessionScope: load.resolved.sessionScope
+  };
   switch (opts.agent) {
     case "codex": {
       if (!opts.codexHomeDir) {

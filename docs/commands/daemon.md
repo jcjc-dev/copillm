@@ -81,7 +81,7 @@ version: 0.4.5 (cli 0.4.6) — restart to apply cli v0.4.6
 version: 0.4.5 — newer version available: v0.4.6 (npm install -g copillm)
 ```
 
-The `--json` payload exposes this as `cli_version`, `daemon_version` (`null` when stopped), `latest_version` (best-effort; `null` if the npm lookup is skipped or fails), `update_available`, `version_hint`, plus the `copillm_home` and `dev_mode` fields behind the `home:` line. Pass `--no-registry-check` (or set `COPILLM_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER`) to skip the registry lookup.
+The `--json` payload exposes this as `cli_version`, `daemon_version` (`null` when stopped), `latest_version` (best-effort; `null` if the npm lookup is skipped or fails), `update_available`, `version_hint`, plus the `copillm_home` and `dev_mode` fields behind the `home:` line. It also reports the resolved `agent_profile`, `agent_session_scope`, and `agent_state_root`. Pass `--no-registry-check` (or set `COPILLM_UPDATE_CHECK=0` / `NO_UPDATE_NOTIFIER`) to skip the registry lookup.
 
 When the daemon is running, the output also includes an `uptime` line showing how long it has been up, broken down into days, hours, minutes, and seconds (e.g. `uptime: 2d 3h 15m 9s (184509s)`). The `--json` payload carries both the raw `uptime_seconds` and the human-readable `uptime_human` string.
 

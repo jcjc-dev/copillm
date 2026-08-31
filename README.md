@@ -120,6 +120,26 @@ account. copillm prints a short notice such as `using account "work" (from
 profile)` so you always know which account a launch is using, and refuses to
 launch with a clear error if the account isn't one you've logged into.
 
+### Optional per-profile agent session isolation
+
+Profiles use copillm's existing shared agent directories by default. Set a
+global default under `[defaults]`, then opt an individual profile into its own
+agent config and session history:
+
+```toml
+[defaults]
+session_scope = "shared"
+
+[profiles.personal]
+session_scope = "isolated"
+```
+
+With that setting, `copillm claude`, `codex`, `pi`, and `copilot` launched with
+the `personal` profile use `~/.copillm/profiles/personal/` for their
+agent-specific state. Copillm's credentials, daemon, binaries, and model
+caches remain shared. Existing sessions are not moved automatically, and
+explicit agent home environment variables still take precedence.
+
 ## Documentation
 
 Full documentation is published at **[jcjc-dev.github.io/copillm](https://jcjc-dev.github.io/copillm/)**.

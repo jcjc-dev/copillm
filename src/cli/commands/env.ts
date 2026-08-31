@@ -1,5 +1,10 @@
 import type { Command } from "commander";
-import { detectClaudeSettingsConflicts, formatSettingsConflictWarning } from "../../integrations/claude/settingsConflict.js";
+import { resolveSessionScope } from "../../agentconfig/sessionScope.js";
+import {
+  claudeSettingsPath,
+  detectClaudeSettingsConflicts,
+  formatSettingsConflictWarning
+} from "../../integrations/claude/settingsConflict.js";
 import { inspectLock } from "../../server/lock.js";
 import { buildCodexEnvBundle, buildPiEnvBundle } from "../agentEnv.js";
 import { isShellSyntax, renderEnvBlock, type ShellSyntax } from "../envBlock.js";
@@ -15,12 +20,18 @@ export function register(program: Command): void {
     .option("--shell <shell>", "Shell syntax: sh|fish|powershell", "sh")
     .option("--json", "JSON output")
     .option("--inline", "Single-line legacy export form (claude only)")
-    .action(async (agentRaw: string, opts: { shell: string; json?: boolean; inline?: boolean }) => {
+    .option("--profile <name>", "Override the active profile for this output")
+    .option("--copillm-profile <name>", "Alias for --profile")
+    .action(async (
+      agentRaw: string,
+      opts: { shell: string; json?: boolean; inline?: boolean; profile?: string; copillmProfile?: string }
+    ) => {
       const agent = parseAgentName(agentRaw);
       if (!isShellSyntax(opts.shell)) {
         throw new Error(`Unsupported --shell value: ${opts.shell}. Use sh, fish, or powershell.`);
       }
       const shell: ShellSyntax = opts.shell;
+      const profileOverride = opts.profile ?? opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
 
       const lockState = inspectLock();
       if (lockState.state !== "running") {
@@ -38,7 +49,11 @@ export function register(program: Command): void {
       }
 
       if (agent === "codex") {
-        const codex = await refreshCodexHome(lockState.lock.port, null);
+        const sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
+        const codex = await refreshCodexHome(lockState.lock.port, null, undefined, {
+          sessionScope: sessionScope.scope,
+          profileName: sessionScope.profileName
+        });
         if (!codex) {
           throw new Error("Failed to prepare Codex home (see warning above).");
         }
@@ -71,11 +86,15 @@ export function register(program: Command): void {
       }
 
       if (agent === "pi") {
-        const pi = await refreshPiHome(lockState.lock.port);
+        const sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
+        const pi = await refreshPiHome(lockState.lock.port, undefined, {
+          sessionScope: sessionScope.scope,
+          profileName: sessionScope.profileName
+        });
         if (!pi) {
           throw new Error("Failed to prepare pi models.json (see warning above).");
         }
-        const bundle = buildPiEnvBundle(pi.outDir);
+        const bundle = buildPiEnvBundle(pi.outDir, sessionScope.scope, sessionScope.profileName);
         const block = renderEnvBlock({
           agent: "pi",
           env: bundle.env,
@@ -108,8 +127,15 @@ export function register(program: Command): void {
         process.exit(0);
       }
 
-      const claude = buildClaudeExportCommand(lockState.lock.port, null);
-      const settingsConflicts = detectClaudeSettingsConflicts(claude.bundle.env);
+      const sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
+      const claude = buildClaudeExportCommand(lockState.lock.port, null, {
+        sessionScope: sessionScope.scope,
+        profileName: sessionScope.profileName
+      });
+      const settingsConflicts = detectClaudeSettingsConflicts(
+        claude.bundle.env,
+        claudeSettingsPath(sessionScope.scope, sessionScope.profileName)
+      );
       if (opts.inline) {
         if (opts.json) {
           process.stdout.write(JSON.stringify({ agent: "claude", inline: claude.command }, null, 2) + "\n");

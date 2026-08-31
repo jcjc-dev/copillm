@@ -85,6 +85,7 @@ export function buildClaudeExportCommand(input: {
   defaults: AnthropicDefaults;
   enableGatewayDiscovery: boolean;
   pathPrefix?: string;
+  configDir?: string;
 }): string {
   const token = input.callerSecret ?? "copillm-local";
   const prefix = input.pathPrefix ?? "";
@@ -103,6 +104,9 @@ export function buildClaudeExportCommand(input: {
   }
   if (input.enableGatewayDiscovery) {
     parts.push(`CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`);
+  }
+  if (input.configDir) {
+    parts.push(`CLAUDE_CONFIG_DIR=${input.configDir}`);
   }
   parts.push(`claude`);
   return parts.join(" ");

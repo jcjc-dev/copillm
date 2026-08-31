@@ -358,6 +358,33 @@ async function main(): Promise<void> {
       }
     });
 
+    await runScenario(failures, "env-claude-isolated-profile", async () => {
+      const configPath = path.join(seeded!.copillmHome, "agent.toml");
+      const previous = fs.existsSync(configPath) ? fs.readFileSync(configPath, "utf8") : null;
+      try {
+        fs.writeFileSync(
+          configPath,
+          `
+[profiles.personal]
+session_scope = "isolated"
+`
+        );
+        const out = await runCli(["env", "claude", "--profile", "personal", "--json"], {
+          COPILLM_HOME: seeded!.copillmHome,
+          COPILLM_UPSTREAM_BASE_URL: mock!.baseUrl,
+          COPILLM_TOKEN_EXCHANGE_URL: mock!.tokenExchangeUrl,
+          COPILLM_GITHUB_USER_URL: mock!.githubUserUrl
+        });
+        assertEquals(out.status, 0, `env claude isolated profile should exit 0; stderr=${out.stderr}`);
+        const parsed = JSON.parse(out.stdout) as { env: Record<string, string> };
+        const expected = path.join(seeded!.copillmHome, "profiles", "personal", "claude", "home");
+        assertEquals(parsed.env.CLAUDE_CONFIG_DIR, expected, "env claude should resolve the isolated config home");
+      } finally {
+        if (previous === null) fs.rmSync(configPath, { force: true });
+        else fs.writeFileSync(configPath, previous);
+      }
+    });
+
     await runLauncherScenarios(failures, daemon, seeded, mock);
   } catch (error) {
     failures.push({ scenario: "fixture-setup", detail: error instanceof Error ? error.stack ?? error.message : String(error) });
@@ -565,6 +592,48 @@ async function runLauncherScenarios(
         }
         if (!out.stderr.includes("cached")) {
           throw new Error(`expected stderr to mention "cached"; got: ${out.stderr}`);
+        }
+      });
+    }
+
+    fs.writeFileSync(
+      path.join(seeded.copillmHome, "agent.toml"),
+      `
+[profiles.personal]
+session_scope = "isolated"
+`
+    );
+    for (const agent of ["codex", "claude", "pi"] as const) {
+      await runScenario(failures, `launcher-${agent}-isolated-profile`, async () => {
+        const scenarioDir = path.join(tmpRoot, `isolated-${agent}`);
+        fs.mkdirSync(scenarioDir, { recursive: true });
+        const capturePath = path.join(scenarioDir, "capture.json");
+        const stub = createAgentStub({ dir: scenarioDir, agent, capturePath });
+        const out = await runCli(["--", agent, "--profile", "personal", "--from-isolated"], {
+          ...mockEnv,
+          ...(agent === "pi" ? { HOME: daemon.fakeHome, USERPROFILE: daemon.fakeHome } : {}),
+          COPILLM_HOME: seeded.copillmHome,
+          COPILLM_USE_SYSTEM_AGENT: "1",
+          PATH: `${stub.binDir}${path.delimiter}${process.env.PATH ?? ""}`
+        });
+        assertEquals(out.status, 0, `isolated ${agent} launcher should exit 0; stderr=${out.stderr}`);
+        const capture = JSON.parse(fs.readFileSync(capturePath, "utf8")) as {
+          argv: string[];
+          env: Record<string, string>;
+        };
+        if (!capture.argv.includes("--from-isolated")) {
+          throw new Error(`isolated ${agent} stub did not receive forwarded args: ${JSON.stringify(capture.argv)}`);
+        }
+        const profileRoot = path.join(seeded.copillmHome, "profiles", "personal");
+        const expected =
+          agent === "codex"
+            ? path.join(profileRoot, "codex")
+            : agent === "claude"
+              ? path.join(profileRoot, "claude", "home")
+              : path.join(profileRoot, "pi", "agent");
+        const envKey = agent === "codex" ? "CODEX_HOME" : agent === "claude" ? "CLAUDE_CONFIG_DIR" : "PI_CODING_AGENT_DIR";
+        if (capture.env[envKey] !== expected) {
+          throw new Error(`isolated ${agent} should set ${envKey}=${expected}; got ${capture.env[envKey]}`);
         }
       });
     }

@@ -53,6 +53,48 @@ url = "https://example.com/mcp"
     expect(Object.keys(result?.resolved.mcpServers ?? {})).toEqual(["github"]);
   });
 
+  it("defaults session scope to shared and merges project/profile overrides deepest-last", () => {
+    writeGlobal(`
+active_profile = "work"
+[defaults]
+session_scope = "isolated"
+[profiles.work]
+session_scope = "shared"
+`);
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.sessionScope).toBe("shared");
+
+    writeProject(`
+[defaults]
+session_scope = "isolated"
+`);
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.sessionScope).toBe("isolated");
+
+    writeProject(`
+[profiles.work]
+session_scope = "shared"
+`);
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.sessionScope).toBe("shared");
+
+    writeGlobal(`[profiles.default]\n`);
+    fs.rmSync(path.join(tmpCwd, ".copillm", "agent.toml"));
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.sessionScope).toBe("shared");
+  });
+
+  it("allows project overlays to configure session scope and rejects invalid values", () => {
+    writeGlobal(`[profiles.default]\n`);
+    writeProject(`
+[profiles.default]
+session_scope = "isolated"
+`);
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.sessionScope).toBe("isolated");
+
+    writeGlobal(`
+[profiles.default]
+session_scope = "per-user"
+`);
+    expect(() => loadAgentConfig({ cwd: tmpCwd })).toThrow(/schema/i);
+  });
+
   it("project overlay replaces same-named server", () => {
     writeGlobal(`
 [defaults.mcp.servers.db]

@@ -8,6 +8,7 @@ import {
   type AgentToml,
   type McpServerEntry,
   type ResolvedProfile,
+  type SessionScope,
   type Section,
   type YoloConfig
 } from "./schema.js";
@@ -179,13 +180,25 @@ function mergeAndResolve(input: {
   };
 
   const yolo = mergeYolo(sections);
+  const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, account, yolo, reserved };
+  return { instructions, mcpServers: servers, account, sessionScope, yolo, reserved };
 }
 
 interface ScopedSection {
   section: Section;
   scope: "global" | "project";
+}
+
+/** Later config layers override the earlier session policy. */
+function mergeSessionScope(layers: Section[]): SessionScope {
+  let sessionScope: SessionScope = "shared";
+  for (const layer of layers) {
+    if (layer.session_scope !== undefined) {
+      sessionScope = layer.session_scope;
+    }
+  }
+  return sessionScope;
 }
 
 /**

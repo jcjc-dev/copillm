@@ -10,7 +10,7 @@ nav_order: 7
 Print the environment block required to wire an agent against copillm manually. Useful when integrating copillm into your own shell profile or process supervisor instead of using the `copillm claude` / `copillm codex` / `copillm pi` launchers.
 
 ```bash
-copillm env <codex|claude|pi> [--shell sh|fish|powershell] [--json] [--inline]
+copillm env <codex|claude|pi> [--profile <name>] [--shell sh|fish|powershell] [--json] [--inline]
 ```
 
 | Flag | Description |
@@ -18,5 +18,6 @@ copillm env <codex|claude|pi> [--shell sh|fish|powershell] [--json] [--inline]
 | `--shell` | Format the output for the given shell. Defaults to a POSIX `sh`-compatible block. |
 | `--json` | Emit `{ var: value }` pairs as JSON. |
 | `--inline` | Emit a single-line `KEY=VAL KEY=VAL` form suitable for prefixing a command (claude only). |
+| `--profile <name>` | Resolve the selected profile instead of `active_profile`. `--copillm-profile` is an alias. |
 
 See the [Using with Claude Code](../../claude-code/) and [Using with Codex CLI](../../codex/) guides for end-to-end wiring examples.

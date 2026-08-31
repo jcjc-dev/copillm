@@ -1,9 +1,10 @@
 import os from "node:os";
+import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { claudeConfigDir } from "../../../src/config/home.js";
-import { claudeGatewayCachePath } from "../../../src/integrations/claude/cache.js";
+import { clearClaudeGatewayCache, claudeGatewayCachePath } from "../../../src/integrations/claude/cache.js";
 import { claudeSettingsPath } from "../../../src/integrations/claude/settingsConflict.js";
 
 // copillm owns Claude's config home so it never reads/writes the user's real
@@ -49,5 +50,26 @@ describe("Claude config home (copillm-owned)", () => {
     expect(claudeConfigDir()).toBe(path.resolve(custom));
     expect(claudeGatewayCachePath()).toBe(path.join(path.resolve(custom), "cache", "gateway-models.json"));
     expect(claudeSettingsPath()).toBe(path.join(path.resolve(custom), "settings.json"));
+  });
+
+  it("clears shared and isolated profile gateway caches", () => {
+    const copillmHome = path.join(os.tmpdir(), "copillm-claude-cache-test");
+    process.env.COPILLM_HOME = copillmHome;
+    const shared = claudeGatewayCachePath();
+    const isolated = claudeGatewayCachePath("isolated", "personal");
+    fs.mkdirSync(path.dirname(shared), { recursive: true });
+    fs.mkdirSync(path.dirname(isolated), { recursive: true });
+    fs.writeFileSync(shared, "{}");
+    fs.writeFileSync(isolated, "{}");
+
+    try {
+      const result = clearClaudeGatewayCache();
+      expect(result.cleared).toBe(true);
+      expect(result.clearedPaths.sort()).toEqual([shared, isolated].sort());
+      expect(fs.existsSync(shared)).toBe(false);
+      expect(fs.existsSync(isolated)).toBe(false);
+    } finally {
+      fs.rmSync(copillmHome, { recursive: true, force: true });
+    }
   });
 });

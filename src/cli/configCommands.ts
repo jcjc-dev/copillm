@@ -17,6 +17,11 @@ const SCAFFOLD_TOML = `# copillm agent config — one source of truth for instru
 
 active_profile = "default"
 
+[defaults]
+# Controls downstream agent config/session directories. "shared" preserves the
+# historical paths; set a profile's value to "isolated" to namespace its state.
+# session_scope = "shared"
+
 [defaults.instructions]
 body = ""
 

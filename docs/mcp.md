@@ -112,6 +112,46 @@ transport = "stdio"
 command = "/opt/custom/playwright-mcp"
 ```
 
+### Isolating agent sessions by profile
+
+By default, every profile keeps using copillm's existing shared agent
+directories. You can set the global default under `[defaults]`, then override
+it for an individual profile:
+
+```toml
+[defaults]
+session_scope = "shared"
+
+[profiles.personal]
+session_scope = "isolated"
+```
+
+`session_scope` accepts `shared` or `isolated`. It follows the normal config
+layering order: project profile, project defaults, global profile, global
+defaults, then the built-in `shared` default. Project overlays may configure
+this setting just like other profile settings.
+
+An isolated profile gets its own downstream agent state under
+`~/.copillm/profiles/<profile>/`:
+
+```text
+~/.copillm/profiles/personal/claude/home
+~/.copillm/profiles/personal/codex
+~/.copillm/profiles/personal/pi/agent
+~/.copillm/profiles/personal/copilot
+```
+
+This includes session history, agent settings, and copillm-generated agent
+configuration. The copillm daemon, credentials, downloaded agent versions, and
+model caches remain shared under `~/.copillm`. Isolation starts with new
+directories; copillm does not automatically move existing session data.
+Isolated profile names must contain only letters, digits, `.`, `_`, or `-`.
+
+The launcher-specific home environment variables still take precedence when
+you set them explicitly: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`PI_CODING_AGENT_DIR`, or `COPILOT_HOME`. In shared mode, copillm does not add
+`COPILOT_HOME`, so Copilot CLI continues using its normal home.
+
 ### Switching profiles
 
 ```bash
@@ -164,27 +204,27 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 
 ### Claude Code
 
-- `copillm claude` writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` and appends `--mcp-config` for that launch. It also points Claude at a copillm-owned config home via `CLAUDE_CONFIG_DIR` (`~/.copillm/claude/home`), so the launch never reads or writes your real `~/.claude`.
+- `copillm claude` writes a copillm-owned MCP file to `~/.copillm/claude/mcp.json` (or the isolated profile directory) and appends `--mcp-config` for that launch. It also points Claude at a copillm-owned config home via `CLAUDE_CONFIG_DIR` (`~/.copillm/claude/home` in shared mode), so the launch never reads or writes your real `~/.claude`.
 - `copillm config sync --agent claude` writes MCP servers into user scope at `~/.claude.json` and writes copillm's provider env into `~/.claude/settings.json`.
 - When the active profile declares no MCP servers, the managed file is removed and no `--mcp-config` flag is added.
 - Instructions fan-out is **not supported** for Claude. Place project guidance in your own `CLAUDE.md` or global guidance in `~/.claude/CLAUDE.md`.
 
 ### Codex CLI
 
-- `copillm codex` injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml` for the wrapped launch.
+- `copillm codex` injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml` (or the isolated profile directory) for the wrapped launch.
 - `copillm config sync --agent codex` merges copillm's provider block into `~/.codex/config.toml` and injects the `[mcp_servers]` block there.
 - The block is delimited with hash-comment markers so subsequent runs replace just the managed section.
 - Requires `copillm start` (or any prior launch) to have generated the base `config.toml` first.
 
 ### pi
 
-- copillm points pi at a copillm-owned agent dir via `PI_CODING_AGENT_DIR` (`~/.copillm/pi/agent`), so it never writes your real `~/.pi`. To launch `pi` directly (without copillm), export `PI_CODING_AGENT_DIR` to that path first.
-- Writes a `copillm-mcp` extension into `~/.copillm/pi/agent/extensions/copillm-mcp/` (`servers.json` + `index.ts`).
+- copillm points pi at a copillm-owned agent dir via `PI_CODING_AGENT_DIR` (`~/.copillm/pi/agent` in shared mode), so it never writes your real `~/.pi`. To launch `pi` directly (without copillm), export `PI_CODING_AGENT_DIR` to that path first.
+- Writes a `copillm-mcp` extension into the selected agent directory (`extensions/copillm-mcp/`; `servers.json` + `index.ts`).
 - v1 lists servers via a `/copillm-mcp` slash command; full stdio/http transport wiring is deferred to a follow-up.
 
 ### Copilot CLI
 
-- `copillm copilot` writes a copillm-owned MCP config to `~/.copillm/copilot/mcp-config.json` and appends `--additional-mcp-config @<path>` for that launch. `copillm config sync --agent copilot` writes the same managed file without launching.
+- `copillm copilot` writes a copillm-owned MCP config to `~/.copillm/copilot/mcp-config.json` (or the isolated profile directory) and appends `--additional-mcp-config @<path>` for that launch. In an isolated profile, it also sets `COPILOT_HOME` so Copilot CLI keeps its own settings and session state in that profile directory. `copillm config sync --agent copilot` writes the same managed file without launching.
 - Each server is emitted with `tools: ["*"]`; stdio servers use `type: "local"`, http/sse servers keep their transport type and URL.
 - When the active profile declares no MCP servers, the managed file is removed and no flag is added.
 

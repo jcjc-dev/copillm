@@ -84,3 +84,7 @@ The launch is validated up front: an unknown, malformed, or not-logged-in accoun
 | `COPILLM_ACCOUNT` | Account to launch against when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |
+
+The active profile can optionally isolate Claude's config and session state
+with `session_scope = "isolated"` in `agent.toml`. See the
+[profile isolation](../../mcp/#isolating-agent-sessions-by-profile) section.

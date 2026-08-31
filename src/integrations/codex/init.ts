@@ -5,6 +5,7 @@ import { loadStoredCredential, type StoredCredential } from "../../auth/credenti
 import { loadConfig } from "../../config/config.js";
 import { listModelsUnion, type ModelDiscoveryResult } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
+import { assertSafeProfileName, type AgentSessionScope } from "../../config/home.js";
 import { buildCodexCatalog } from "../../server/codexSchema.js";
 import { inspectLock } from "../../server/lock.js";
 import type { AppConfig } from "../../types/index.js";
@@ -228,8 +229,19 @@ function assertCodexSlug(value: string, field: string): void {
   }
 }
 
-export function defaultOutputDir(home: string): string {
-  return path.join(home, "codex");
+export function defaultOutputDir(
+  home: string,
+  sessionScope: AgentSessionScope = "shared",
+  profileName?: string | null
+): string {
+  if (sessionScope === "isolated") {
+    assertSafeProfileName(profileName);
+  }
+  const root =
+    sessionScope === "shared"
+      ? home
+      : path.join(home, "profiles", profileName as string);
+  return path.join(root, "codex");
 }
 
 export function listExistingCodexHomes(home: string): string[] {

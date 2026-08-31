@@ -110,6 +110,30 @@ describe("renderConfigToml safety (codex init)", () => {
     expect(tableHeaders).toEqual(["[model_providers.copillm]"]);
   });
 
+  it("writes an isolated profile's Codex home below the profile root", async () => {
+    const { generateCodexHome, defaultOutputDir } = await import(
+      "../../../src/integrations/codex/init.js"
+    );
+    const outDir = defaultOutputDir(tmpHome, "isolated", "personal");
+    const result = await generateCodexHome({
+      outDir,
+      model: null,
+      port: 4141,
+      providerId: "copillm",
+      reasoningEffort: null,
+      precomputed: {
+        creds: FAKE_CREDS,
+        config: FAKE_CONFIG,
+        discovery: FAKE_DISCOVERY("gpt-test")
+      }
+    });
+
+    expect(result.outDir).toBe(path.join(tmpHome, "profiles", "personal", "codex"));
+    expect(result.configPath).toBe(path.join(tmpHome, "profiles", "personal", "codex", "config.toml"));
+    expect(fs.existsSync(result.configPath)).toBe(true);
+    expect(fs.existsSync(path.join(tmpHome, "codex", "config.toml"))).toBe(false);
+  });
+
   it("rejects an upstream model id that contains a quote", async () => {
     const { generateCodexHome, defaultOutputDir, CodexInitError } = await import(
       "../../../src/integrations/codex/init.js"

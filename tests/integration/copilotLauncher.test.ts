@@ -45,6 +45,7 @@ function writeShim(dir: string, dumpPath: string): string {
       `}\n` +
       `fs.writeFileSync(${JSON.stringify(dumpPath)}, JSON.stringify({\n` +
       `  COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN ?? "",\n` +
+      `  COPILOT_HOME: process.env.COPILOT_HOME ?? "",\n` +
       `  args: process.argv.slice(2)\n` +
       `}) + "\\n");\n` +
       `process.exit(0);\n`,
@@ -152,6 +153,7 @@ url = "https://example.com/mcp"
 headers = { Authorization = "Bearer abc" }
 `
     );
+    fs.rmSync(path.join(tmpHome, "copilot"), { recursive: true, force: true });
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -161,6 +163,7 @@ headers = { Authorization = "Bearer abc" }
       COPILLM_USE_SYSTEM_AGENT: "1"
     };
     delete env.COPILOT_GITHUB_TOKEN;
+    delete env.COPILOT_HOME;
 
     const result = spawnSync(
       process.execPath,
@@ -175,8 +178,10 @@ headers = { Authorization = "Bearer abc" }
     const managedPath = path.join(tmpHome, "copilot", "mcp-config.json");
     const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as {
       COPILOT_GITHUB_TOKEN: string;
+      COPILOT_HOME: string;
       args: string[];
     };
+    expect(dump.COPILOT_HOME).toBe("");
     expect(dump.args).toEqual([
       "-p",
       "hello",
@@ -227,5 +232,55 @@ headers = { Authorization = "Bearer abc" }
     } finally {
       fs.rmSync(emptyHome, { recursive: true, force: true });
     }
+  });
+
+  it("isolates Copilot CLI home and managed MCP config for an isolated profile", () => {
+    if (process.platform === "win32") return;
+    if (!tmpHome || !shimDir || !envDumpPath) {
+      throw new Error("test setup did not complete");
+    }
+
+    fs.writeFileSync(
+      path.join(tmpHome, "agent.toml"),
+      `
+[profiles.personal]
+session_scope = "isolated"
+
+[profiles.personal.mcp.servers.personal_server]
+transport = "stdio"
+command = "echo"
+`
+    );
+    fs.rmSync(path.join(tmpHome, "copilot"), { recursive: true, force: true });
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+      COPILLM_HOME: tmpHome,
+      COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1",
+      COPILLM_USE_SYSTEM_AGENT: "1"
+    };
+    delete env.COPILOT_GITHUB_TOKEN;
+    delete env.COPILOT_HOME;
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "copilot", "--profile", "personal", "-p", "hello"],
+      { env, encoding: "utf8", timeout: 30_000 }
+    );
+
+    expect(result.error, result.error?.message).toBeUndefined();
+    expect(result.status).toBe(0);
+
+    const profileRoot = path.join(tmpHome, "profiles", "personal");
+    const managedPath = path.join(profileRoot, "copilot", "mcp-config.json");
+    const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as {
+      COPILOT_HOME: string;
+      args: string[];
+    };
+    expect(dump.COPILOT_HOME).toBe(path.join(profileRoot, "copilot"));
+    expect(dump.args).toContain(`@${managedPath}`);
+    expect(fs.existsSync(managedPath)).toBe(true);
+    expect(fs.existsSync(path.join(tmpHome, "copilot", "mcp-config.json"))).toBe(false);
   });
 });

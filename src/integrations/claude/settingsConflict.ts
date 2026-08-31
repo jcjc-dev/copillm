@@ -1,6 +1,6 @@
 import fs from "node:fs";
-import { claudeConfigDir } from "../../config/home.js";
 import path from "node:path";
+import { claudeConfigDir, type AgentSessionScope } from "../../config/home.js";
 
 export interface SettingsEnvConflict {
   key: string;
@@ -15,11 +15,14 @@ export interface DetectSettingsConflictsResult {
   conflicts: SettingsEnvConflict[];
 }
 
-export function claudeSettingsPath(): string {
+export function claudeSettingsPath(
+  scope: AgentSessionScope = "shared",
+  profileName?: string | null
+): string {
   // copillm-launched Claude reads settings from its copillm-owned config home
   // (CLAUDE_CONFIG_DIR), so the conflict check inspects that file — not the
   // user's real ~/.claude/settings.json.
-  return path.join(claudeConfigDir(), "settings.json");
+  return path.join(claudeConfigDir(scope, profileName), "settings.json");
 }
 
 export function detectClaudeSettingsConflicts(

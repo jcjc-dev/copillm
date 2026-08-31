@@ -3,7 +3,12 @@ import {
   readModelIdsFromCache,
   type AnthropicDefaults
 } from "../models/anthropicDefaults.js";
-import { claudeConfigDir, piAgentDir } from "../config/home.js";
+import {
+  claudeConfigDir,
+  copilotHomeDir,
+  piAgentDir,
+  type AgentSessionScope
+} from "../config/home.js";
 
 export interface ClaudeEnvBundle {
   env: Record<string, string>;
@@ -30,17 +35,21 @@ export function buildClaudeEnvBundle(input: {
   defaults?: AnthropicDefaults;
   enableGatewayDiscovery?: boolean;
   pathPrefix?: string;
+  sessionScope?: AgentSessionScope;
+  profileName?: string | null;
 }): ClaudeEnvBundle {
   const defaults = input.defaults ?? computeAnthropicDefaults(readModelIdsFromCache());
   const enableGateway = input.enableGatewayDiscovery !== false;
   const prefix = input.pathPrefix ?? "";
+  const sessionScope = input.sessionScope ?? "shared";
+  const profileName = input.profileName ?? null;
 
   const env: Record<string, string> = {
     ANTHROPIC_BASE_URL: `http://127.0.0.1:${input.port}${prefix}/anthropic`,
     ANTHROPIC_AUTH_TOKEN: input.callerSecret ?? "copillm-local",
     // Point Claude at a copillm-owned config home so copillm-launched Claude
     // never reads/writes the user's real ~/.claude (and dev mode isolates it).
-    CLAUDE_CONFIG_DIR: claudeConfigDir()
+    CLAUDE_CONFIG_DIR: claudeConfigDir(sessionScope, profileName)
   };
   const trailingNotes: string[] = [];
 
@@ -82,14 +91,28 @@ export function buildCodexEnvBundle(absHomeDir: string): CodexEnvBundle {
  * there — never the user's real `~/.pi`. This is also what makes dev mode
  * isolate pi for free (the dev COPILLM_HOME relocates the agent dir).
  */
-export function buildPiEnvBundle(absMirrorDir: string): PiEnvBundle {
-  const agentDir = piAgentDir();
+export function buildPiEnvBundle(
+  absMirrorDir: string,
+  sessionScope: AgentSessionScope = "shared",
+  profileName?: string | null
+): PiEnvBundle {
+  const agentDir = piAgentDir(sessionScope, profileName);
   return {
     env: { PI_CODING_AGENT_DIR: agentDir },
     inlineComments: {},
     trailingNotes: [
       `pi reads ${agentDir}/models.json (copillm sets PI_CODING_AGENT_DIR).`,
-      `copillm regenerated it on \`copillm start\` and mirrored it at ${absMirrorDir}/models.json.`
+      `copillm regenerates it before launch and mirrors it at ${absMirrorDir}/models.json.`
     ]
   };
+}
+
+export function buildCopilotEnvOverlay(
+  sessionScope: AgentSessionScope,
+  profileName?: string | null
+): Record<string, string> {
+  if (sessionScope !== "isolated") {
+    return {};
+  }
+  return { COPILOT_HOME: copilotHomeDir(sessionScope, profileName) };
 }
