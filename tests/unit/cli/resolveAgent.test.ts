@@ -598,10 +598,12 @@ process.exit(0);
 
   it("passes an existing user-level npmrc to version lookup and install", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-userconfig-"));
-    const previousUserConfig = process.env.NPM_CONFIG_USERCONFIG;
+    const previousLowerUserConfig = process.env.npm_config_userconfig;
+    const previousUpperUserConfig = process.env.NPM_CONFIG_USERCONFIG;
     try {
       const userConfigPath = path.join(tmp, "user.npmrc");
       fs.writeFileSync(userConfigPath, "");
+      process.env.npm_config_userconfig = userConfigPath;
       process.env.NPM_CONFIG_USERCONFIG = userConfigPath;
 
       const argvLog = path.join(tmp, "npm-argv.jsonl");
@@ -622,10 +624,15 @@ process.exit(0);
         expect(call).not.toContain("--registry");
       }
     } finally {
-      if (previousUserConfig === undefined) {
+      if (previousLowerUserConfig === undefined) {
+        delete process.env.npm_config_userconfig;
+      } else {
+        process.env.npm_config_userconfig = previousLowerUserConfig;
+      }
+      if (previousUpperUserConfig === undefined) {
         delete process.env.NPM_CONFIG_USERCONFIG;
       } else {
-        process.env.NPM_CONFIG_USERCONFIG = previousUserConfig;
+        process.env.NPM_CONFIG_USERCONFIG = previousUpperUserConfig;
       }
       fs.rmSync(tmp, { recursive: true, force: true });
     }
