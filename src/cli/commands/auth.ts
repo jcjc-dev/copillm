@@ -88,7 +88,8 @@ export function register(program: Command): void {
       // listing. Single-account installs keep the exact original output below.
       if (readAccountsIndex()) {
         const { anyStored } = await runAuthStatusList(opts);
-        process.exit(anyStored ? 0 : 2);
+        process.exitCode = anyStored ? 0 : 2;
+        return;
       }
 
       // Two paths to minimize keychain probes:
@@ -124,7 +125,8 @@ export function register(program: Command): void {
         } else {
           process.stderr.write(`auth status error: ${message}\n`);
         }
-        process.exit(1);
+        process.exitCode = 1;
+        return;
       }
 
       const userLookupEnabled = info.stored && wantUserLookup;
@@ -161,6 +163,8 @@ export function register(program: Command): void {
       } else {
         process.stdout.write("not logged in\n");
       }
-      process.exit(info.stored ? 0 : 2);
+      // Let any async keychain or identity lookup work finish before Node
+      // exits; process.exit(...) can trigger a Windows libuv teardown assertion.
+      process.exitCode = info.stored ? 0 : 2;
     });
 }
