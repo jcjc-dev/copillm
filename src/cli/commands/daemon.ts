@@ -23,6 +23,7 @@ import { resolveRestartDecision, type DaemonLockState } from "../daemon/restart.
 import { selfUpdateToLatest, describeSelfUpdate, type SelfUpdateResult } from "../daemon/selfUpdate.js";
 import { computeVersionStatus, type VersionStatusFields } from "../daemon/versionStatus.js";
 import { getPackageInfo } from "../../config/packageInfo.js";
+import { resolveSessionScope } from "../../agentconfig/sessionScope.js";
 
 export function register(program: Command): void {
   program
@@ -293,6 +294,10 @@ export function register(program: Command): void {
     )
     .action(async (opts: { json?: boolean; registryCheck?: boolean }) => {
       const config = loadConfig();
+      const sessionScope = resolveSessionScope({
+        cwd: process.cwd(),
+        profileOverride: process.env.COPILLM_PROFILE ?? null
+      });
       const lockState = inspectLock();
       const checkedAtIso = new Date().toISOString();
       const uptimeSeconds = lockState.state === "running" ? computeUptimeSeconds(lockState.lock.started_at_iso) : null;
@@ -314,6 +319,9 @@ export function register(program: Command): void {
         stale: lockState.state === "stale",
         copillm_home: getCopillmHome(),
         dev_mode: isDevModeActive(),
+        agent_profile: sessionScope.profileName,
+        agent_session_scope: sessionScope.scope,
+        agent_state_root: sessionScope.stateRoot,
         pid: lockState.state === "running" ? lockState.lock.pid : null,
         port: lockState.state === "running" ? lockState.lock.port : null,
         started_at_iso: lockState.state === "running" ? lockState.lock.started_at_iso : null,
@@ -371,6 +379,10 @@ export function register(program: Command): void {
       }
 
       process.stdout.write(`home: ${displayHomePath(status.copillm_home)}${status.dev_mode ? " (dev)" : ""}\n`);
+      process.stdout.write(
+        `agent state: ${displayHomePath(status.agent_state_root)} ` +
+        `(profile ${status.agent_profile}, ${status.agent_session_scope})\n`
+      );
 
       if (lockState.state === "running") {
         process.stdout.write(`running (pid ${lockState.lock.pid}, port ${lockState.lock.port})\n`);

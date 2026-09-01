@@ -7,6 +7,7 @@ import { launchAgent } from "../../launchAgent.js";
 import { refreshPiHome } from "../../integrations/refreshPi.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
+import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
 
 export function register(program: Command): void {
   program
@@ -19,13 +20,16 @@ export function register(program: Command): void {
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
         const debug = resolveCopillmDebug(opts.copillmDebug);
+        const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
+        let sessionScope: SessionScopeResolution;
         let launchAccount;
         try {
+          sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
           launchAccount = await resolveLaunchAccount({
             flag: opts.copillmAccount,
             envValue: process.env.COPILLM_ACCOUNT,
             cwd: process.cwd(),
-            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+            profileOverride
           });
         } catch (error) {
           process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -39,12 +43,14 @@ export function register(program: Command): void {
         const lock = await ensureDaemonRunningForLauncher({ debug });
         const pi = await refreshPiHome(lock.port, undefined, {
           pathPrefix: launchAccount?.pathPrefix,
-          account: launchAccount?.account
+          account: launchAccount?.account,
+          sessionScope: sessionScope.scope,
+          profileName: sessionScope.profileName
         });
         if (!pi) {
           throw new Error("Failed to prepare pi models.json (see warning above).");
         }
-        const bundle = buildPiEnvBundle(pi.outDir);
+        const bundle = buildPiEnvBundle(pi.outDir, sessionScope.scope, sessionScope.profileName);
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_PI_VERSION ?? undefined;
         const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
           ? "cli"
@@ -54,7 +60,7 @@ export function register(program: Command): void {
         const applyResult = applyAgentConfig({
           agent: "pi",
           cwd: process.cwd(),
-          profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+          profileOverride,
           skip: Boolean(opts.copillmNoConfig)
         });
         for (const line of formatApplyNotes(applyResult, "pi")) {

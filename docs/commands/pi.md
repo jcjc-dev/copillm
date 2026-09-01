@@ -42,7 +42,7 @@ copillm --debug pi                   # copillm daemon diagnostics
 ## What it does
 
 1. Starts the copillm daemon in the background if it is not already running.
-2. Refreshes pi's copillm model list in copillm's own agent dir (`~/.copillm/pi/agent`, via `PI_CODING_AGENT_DIR`) so pi sees the live Copilot catalogue. copillm never writes your real `~/.pi`.
+2. Refreshes pi's copillm model list in copillm's own agent dir (`~/.copillm/pi/agent` in shared mode, or the selected profile's isolated directory, via `PI_CODING_AGENT_DIR`) so pi sees the live Copilot catalogue. copillm never writes your real `~/.pi`.
 3. Resolves the pi binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_PI_VERSION` environment variable
    2. A cached install at `~/.copillm/bin/pi/<version>/`
@@ -78,5 +78,6 @@ The launch is validated up front: an unknown, malformed, or not-logged-in accoun
 | `COPILLM_PI_VERSION` | Pin a specific pi version. |
 | `COPILLM_ACCOUNT` | Account to launch against when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PROFILE` | Default profile selection used when `--copillm-profile` is not passed. |
+| `PI_CODING_AGENT_DIR` | Explicitly override the pi config/session directory; this takes precedence over profile isolation. |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |

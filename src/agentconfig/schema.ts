@@ -12,6 +12,8 @@ import { z } from "zod";
  * `instructions` and `mcp` into fan-out — the other
  * sections (`skills`, `agents`, `hooks`, `permissions`) are reserved-but-
  * permissive so users can start populating them without future TOML breaking.
+ * `session_scope` controls whether downstream agent state uses the historical
+ * shared paths or a profile-namespaced home.
  */
 
 const StringRecord = z.record(z.string());
@@ -79,8 +81,16 @@ const YoloSchema = z
 
 export type YoloConfig = z.infer<typeof YoloSchema>;
 
+export const SessionScopeSchema = z.enum(["shared", "isolated"]);
+export type SessionScope = z.infer<typeof SessionScopeSchema>;
+
 const SectionSchema = z
   .object({
+    /**
+     * Controls where downstream agent config and session state live. This is
+     * merged with the same defaults/profile precedence as the other settings.
+     */
+    session_scope: SessionScopeSchema.optional(),
     instructions: InstructionsSchema.optional(),
     mcp: McpSchema.optional(),
     yolo: YoloSchema.optional(),
@@ -113,6 +123,8 @@ export type AgentToml = z.infer<typeof AgentTomlSchema>;
 export interface ResolvedProfile {
   instructions: { body: string } | null;
   mcpServers: Record<string, McpServerEntry>;
+  /** Resolved downstream agent state policy; defaults to the legacy shared paths. */
+  sessionScope: SessionScope;
   /**
    * Account this profile pins launches to, or null when unset. The launcher
    * applies precedence `--account` > `COPILLM_ACCOUNT` > this > default.

@@ -1,12 +1,17 @@
 import type { Command } from "commander";
 import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.js";
-import { detectClaudeSettingsConflicts, formatSettingsConflictWarning } from "../../../integrations/claude/settingsConflict.js";
+import {
+  claudeSettingsPath,
+  detectClaudeSettingsConflicts,
+  formatSettingsConflictWarning
+} from "../../../integrations/claude/settingsConflict.js";
 import { processCopillmArgs } from "../../copillmFlags.js";
 import { ensureDaemonRunningForLauncher } from "../../daemon/ensureRunning.js";
 import { launchAgent } from "../../launchAgent.js";
 import { buildClaudeExportCommand } from "../../integrations/claudeExport.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
+import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
 
 export function register(program: Command): void {
   program
@@ -19,13 +24,16 @@ export function register(program: Command): void {
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
         const debug = resolveCopillmDebug(opts.copillmDebug);
+        const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
+        let sessionScope: SessionScopeResolution;
         let launchAccount;
         try {
+          sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
           launchAccount = await resolveLaunchAccount({
             flag: opts.copillmAccount,
             envValue: process.env.COPILLM_ACCOUNT,
             cwd: process.cwd(),
-            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+            profileOverride
           });
         } catch (error) {
           process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -39,7 +47,9 @@ export function register(program: Command): void {
         const lock = await ensureDaemonRunningForLauncher({ debug });
         const claude = buildClaudeExportCommand(lock.port, null, {
           pathPrefix: launchAccount?.pathPrefix,
-          cacheId: launchAccount?.cacheId
+          cacheId: launchAccount?.cacheId,
+          sessionScope: sessionScope.scope,
+          profileName: sessionScope.profileName
         });
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CLAUDE_VERSION ?? undefined;
         const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
@@ -47,14 +57,17 @@ export function register(program: Command): void {
           : process.env.COPILLM_CLAUDE_VERSION
             ? "env"
             : undefined;
-        const conflicts = detectClaudeSettingsConflicts(claude.bundle.env);
+        const conflicts = detectClaudeSettingsConflicts(
+          claude.bundle.env,
+          claudeSettingsPath(sessionScope.scope, sessionScope.profileName)
+        );
         for (const line of formatSettingsConflictWarning(conflicts)) {
           process.stderr.write(`${line}\n`);
         }
         const applyResult = applyAgentConfig({
           agent: "claude",
           cwd: process.cwd(),
-          profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+          profileOverride,
           skip: Boolean(opts.copillmNoConfig)
         });
         for (const line of formatApplyNotes(applyResult, "claude")) {

@@ -57,3 +57,4 @@ Unlike the other launchers, `copillm copilot` does **not** start the proxy daemo
 | `COPILLM_ACCOUNT` | Account whose GitHub token to use when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PROFILE` | Default profile selection used when `--copillm-profile` is not passed. |
 | `COPILLM_YOLO` | Tri-state default for `--yolo` (`1`/`true`/`yes` → enable; `0`/`false`/`no` → disable; unset → inherit `agent.toml`). |
+| `COPILOT_HOME` | Explicitly override Copilot CLI's config/session directory; this takes precedence over profile isolation. In shared mode copillm does not set this variable. |

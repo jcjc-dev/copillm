@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import path from "node:path";
-import { buildClaudeEnvBundle, buildCodexEnvBundle, buildPiEnvBundle } from "../../../src/cli/agentEnv.js";
+import {
+  buildClaudeEnvBundle,
+  buildCodexEnvBundle,
+  buildCopilotEnvOverlay,
+  buildPiEnvBundle
+} from "../../../src/cli/agentEnv.js";
 
 describe("buildClaudeEnvBundle", () => {
   it("includes base url, auth token placeholder, and gateway flag by default", () => {
@@ -41,8 +46,34 @@ describe("buildClaudeEnvBundle", () => {
       defaults: { opus: null, sonnet: null, haiku: null },
       enableGatewayDiscovery: false
     });
+
     expect(bundle.env.ANTHROPIC_AUTH_TOKEN).toBe("secret-token-xyz");
     expect(bundle.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
+  });
+
+  it("uses the profile-specific Claude config home when isolated", () => {
+    const savedHome = process.env.COPILLM_HOME;
+    const savedConfig = process.env.CLAUDE_CONFIG_DIR;
+    process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
+    delete process.env.CLAUDE_CONFIG_DIR;
+    try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
+      const bundle = buildClaudeEnvBundle({
+        port: 4141,
+        callerSecret: null,
+        defaults: { opus: null, sonnet: null, haiku: null },
+        sessionScope: "isolated",
+        profileName: "personal"
+      });
+      expect(bundle.env.CLAUDE_CONFIG_DIR).toBe(
+        path.join(expectedHome, "profiles", "personal", "claude", "home")
+      );
+    } finally {
+      if (savedHome === undefined) delete process.env.COPILLM_HOME;
+      else process.env.COPILLM_HOME = savedHome;
+      if (savedConfig === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+      else process.env.CLAUDE_CONFIG_DIR = savedConfig;
+    }
   });
 
   it("emits trailing notes for missing variants and omits the env vars", () => {
@@ -87,5 +118,48 @@ describe("buildPiEnvBundle", () => {
     // The notes must reference the env var copillm sets and the mirror dir.
     expect(bundle.trailingNotes.some((n) => n.includes("PI_CODING_AGENT_DIR"))).toBe(true);
     expect(bundle.trailingNotes.some((n) => n.includes("/tmp/pi/models.json"))).toBe(true);
+  });
+
+  it("exports the profile-specific pi agent dir when isolated", () => {
+    const savedHome = process.env.COPILLM_HOME;
+    const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
+    delete process.env.PI_CODING_AGENT_DIR;
+    try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
+      const bundle = buildPiEnvBundle("/tmp/pi", "isolated", "personal");
+      expect(bundle.env.PI_CODING_AGENT_DIR).toBe(
+        path.join(expectedHome, "profiles", "personal", "pi", "agent")
+      );
+    } finally {
+      if (savedHome === undefined) delete process.env.COPILLM_HOME;
+      else process.env.COPILLM_HOME = savedHome;
+      if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+    }
+  });
+});
+
+describe("buildCopilotEnvOverlay", () => {
+  it("does not set COPILOT_HOME for shared profiles", () => {
+    expect(buildCopilotEnvOverlay("shared", "work")).toEqual({});
+  });
+
+  it("sets COPILOT_HOME only for isolated profiles", () => {
+    const savedHome = process.env.COPILLM_HOME;
+    const savedCopilot = process.env.COPILOT_HOME;
+    process.env.COPILLM_HOME = path.join(path.sep, "tmp", "copillm-profile-home");
+    delete process.env.COPILOT_HOME;
+    try {
+      const expectedHome = path.resolve(process.env.COPILLM_HOME);
+      expect(buildCopilotEnvOverlay("isolated", "personal")).toEqual({
+        COPILOT_HOME: path.join(expectedHome, "profiles", "personal", "copilot")
+      });
+    } finally {
+      if (savedHome === undefined) delete process.env.COPILLM_HOME;
+      else process.env.COPILLM_HOME = savedHome;
+      if (savedCopilot === undefined) delete process.env.COPILOT_HOME;
+      else process.env.COPILOT_HOME = savedCopilot;
+    }
   });
 });

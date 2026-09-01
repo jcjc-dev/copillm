@@ -2,6 +2,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+export type AgentSessionScope = "shared" | "isolated";
+
 export function getCopillmHome(): string {
   const overridden = process.env.COPILLM_HOME;
   if (overridden && overridden.trim().length > 0) {
@@ -88,39 +90,119 @@ export function debugLogPath(): string {
 }
 
 /**
+ * The root used for downstream agent state.
+ *
+ * `shared` deliberately returns the historical copillm home so existing
+ * profiles keep using the same files. `isolated` namespaces state by the
+ * resolved profile name while leaving copillm's daemon, credentials, binary
+ * cache, and model caches in the shared home.
+ */
+export function agentStateRoot(scope: AgentSessionScope = "shared", profileName?: string | null): string {
+  if (scope === "shared") {
+    return getCopillmHome();
+  }
+  assertSafeProfileName(profileName);
+  return path.join(getCopillmHome(), "profiles", profileName);
+}
+
+export function assertSafeProfileName(profileName: string | null | undefined): asserts profileName is string {
+  if (
+    typeof profileName !== "string" ||
+    profileName.length === 0 ||
+    profileName === "." ||
+    profileName === ".." ||
+    !/^[A-Za-z0-9._-]+$/.test(profileName)
+  ) {
+    throw new Error(
+      `Cannot use isolated session scope for profile "${String(profileName)}": ` +
+        "profile names must contain only letters, digits, '.', '_' or '-'."
+    );
+  }
+}
+
+/** Return the roots of all profile-namespaced agent state directories. */
+export function listIsolatedProfileRoots(): string[] {
+  const profilesRoot = path.join(getCopillmHome(), "profiles");
+  if (!fs.existsSync(profilesRoot)) {
+    return [];
+  }
+  try {
+    return fs
+      .readdirSync(profilesRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && isSafeProfileName(entry.name))
+      .map((entry) => path.join(profilesRoot, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+function isSafeProfileName(profileName: string): boolean {
+  return (
+    profileName.length > 0 &&
+    profileName !== "." &&
+    profileName !== ".." &&
+    /^[A-Za-z0-9._-]+$/.test(profileName)
+  );
+}
+
+export function codexHomeDir(scope: AgentSessionScope = "shared", profileName?: string | null): string {
+  const overridden = process.env.CODEX_HOME;
+  if (overridden && overridden.trim().length > 0) {
+    return path.resolve(overridden.trim());
+  }
+  return path.join(agentStateRoot(scope, profileName), "codex");
+}
+
+/**
  * The directory pi (`@earendil-works/pi-coding-agent`) reads its config from.
  *
  * pi exposes this via the `PI_CODING_AGENT_DIR` env var — its own `getAgentDir()`
  * treats the value as the agent dir directly (equivalent to `~/.pi/agent`).
- * copillm owns this path: it defaults to `<COPILLM_HOME>/pi/agent` so copillm
- * never writes into the user's real `~/.pi`, and dev mode relocates it for free
- * via COPILLM_HOME. An explicitly-set `PI_CODING_AGENT_DIR` always wins.
+ * copillm owns this path: it defaults to `<COPILLM_HOME>/pi/agent` in shared
+ * mode and `<COPILLM_HOME>/profiles/<profile>/pi/agent` in isolated mode, so
+ * copillm never writes into the user's real `~/.pi`. An explicitly-set
+ * `PI_CODING_AGENT_DIR` always wins.
  */
-export function piAgentDir(): string {
+export function piAgentDir(scope: AgentSessionScope = "shared", profileName?: string | null): string {
   const overridden = process.env.PI_CODING_AGENT_DIR;
   if (overridden && overridden.trim().length > 0) {
     return path.resolve(overridden.trim());
   }
-  return path.join(getCopillmHome(), "pi", "agent");
+  return path.join(agentStateRoot(scope, profileName), "pi", "agent");
 }
 
 /**
  * The config home Claude Code reads (its `~/.claude` equivalent), exposed by
  * Claude Code as the `CLAUDE_CONFIG_DIR` env var.
  *
- * copillm owns this path: it defaults to `<COPILLM_HOME>/claude/home` and copillm
- * exports `CLAUDE_CONFIG_DIR` to it when launching Claude (see
- * `buildClaudeEnvBundle`). This keeps copillm out of the user's real `~/.claude`
- * — copillm-launched Claude gets a deterministic, copillm-owned config home, and
- * dev mode relocates it for free via COPILLM_HOME. An explicitly-set
+ * copillm owns this path: it defaults to `<COPILLM_HOME>/claude/home` in shared
+ * mode and `<COPILLM_HOME>/profiles/<profile>/claude/home` in isolated mode.
+ * This keeps copillm out of the user's real `~/.claude`; an explicitly-set
  * `CLAUDE_CONFIG_DIR` always wins.
  */
-export function claudeConfigDir(): string {
+export function claudeConfigDir(scope: AgentSessionScope = "shared", profileName?: string | null): string {
   const overridden = process.env.CLAUDE_CONFIG_DIR;
   if (overridden && overridden.trim().length > 0) {
     return path.resolve(overridden.trim());
   }
-  return path.join(getCopillmHome(), "claude", "home");
+  return path.join(agentStateRoot(scope, profileName), "claude", "home");
+}
+
+export function claudeMcpConfigPath(scope: AgentSessionScope = "shared", profileName?: string | null): string {
+  return path.join(agentStateRoot(scope, profileName), "claude", "mcp.json");
+}
+
+/**
+ * Copilot CLI's own home is intentionally untouched in shared mode. The
+ * launcher only exports COPILOT_HOME for an isolated profile, but renderers
+ * still use an explicitly supplied COPILOT_HOME when one exists.
+ */
+export function copilotHomeDir(scope: AgentSessionScope = "shared", profileName?: string | null): string {
+  const overridden = process.env.COPILOT_HOME;
+  if (overridden && overridden.trim().length > 0) {
+    return path.resolve(overridden.trim());
+  }
+  return path.join(agentStateRoot(scope, profileName), "copilot");
 }
 
 function resolveReadablePath(fileName: string): string {

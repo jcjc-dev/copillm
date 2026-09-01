@@ -54,7 +54,7 @@ copillm --debug codex                # equivalent (global debug flag still works
    ```text
    → codex (cached, ~/.copillm/bin/codex/1.4.9, v1.4.9)
    ```
-4. Generates `~/.copillm/codex/config.toml` and points Codex at it (via `CODEX_HOME`), so Codex sends requests to `http://127.0.0.1:4141/codex/v1`.
+4. Generates `~/.copillm/codex/config.toml` and points Codex at it (via `CODEX_HOME`), or generates the selected profile's isolated Codex home when `session_scope = "isolated"`. Codex sends requests to `http://127.0.0.1:4141/codex/v1`.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
 For details on Codex-specific configuration, see [Using with Codex CLI](../../codex/).
@@ -82,6 +82,6 @@ The launch is validated up front: an unknown, malformed, or not-logged-in accoun
 | --- | --- |
 | `COPILLM_CODEX_VERSION` | Pin a specific Codex CLI version. |
 | `COPILLM_ACCOUNT` | Account to launch against when `--account` is not passed. See [Account selection](#account-selection). |
-| `CODEX_HOME` | Set by copillm when launching Codex, pointing it at the generated config under `~/.copillm/codex/`. |
+| `CODEX_HOME` | Set by copillm when launching Codex, pointing it at the generated shared or profile-isolated config. |
 | `COPILLM_PORT` | Override the daemon port (default `4141`). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |

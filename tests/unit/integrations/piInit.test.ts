@@ -222,6 +222,7 @@ describe("generatePiHome", () => {
         port: 4242,
         providerId: "copillm"
       });
+
       const expected = path.join(path.resolve(customAgentDir), "models.json");
       expect(piModelsJsonPath()).toBe(expected);
       expect(result.configPath).toBe(expected);
@@ -231,6 +232,27 @@ describe("generatePiHome", () => {
     } finally {
       fs.rmSync(customAgentDir, { recursive: true, force: true });
     }
+  });
+
+  it("writes an isolated profile's actual pi config below the profile root", async () => {
+    const { generatePiHome, defaultOutputDir, piModelsJsonPath } = await import(
+      "../../../src/integrations/pi/init.js"
+    );
+    const outDir = defaultOutputDir(tmpCopillmHome, "isolated", "personal");
+    const result = await generatePiHome({
+      outDir,
+      port: 4242,
+      providerId: "copillm",
+      sessionScope: "isolated",
+      profileName: "personal"
+    });
+
+    const expected = path.join(tmpCopillmHome, "profiles", "personal", "pi", "agent", "models.json");
+    expect(result.mirrorPath).toBe(path.join(tmpCopillmHome, "profiles", "personal", "pi", "models.json"));
+    expect(result.configPath).toBe(expected);
+    expect(result.configPath).toBe(piModelsJsonPath("isolated", "personal"));
+    expect(fs.existsSync(expected)).toBe(true);
+    expect(fs.existsSync(path.join(tmpCopillmHome, "pi", "agent", "models.json"))).toBe(false);
   });
 
   it("backs up a pre-existing models.json when the new content differs", async () => {

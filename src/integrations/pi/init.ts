@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { type CopilotModel } from "../../models/discovery.js";
 import { ensureSecureDirectory, writeFileSecureAtomic } from "../../config/fsSecurity.js";
-import { piAgentDir } from "../../config/home.js";
+import { assertSafeProfileName, piAgentDir, type AgentSessionScope } from "../../config/home.js";
 import { resolveStartContext, type AccountDiscoveryOverride, type PrecomputedStartContext } from "../codex/init.js";
 
 /**
@@ -11,11 +11,12 @@ import { resolveStartContext, type AccountDiscoveryOverride, type PrecomputedSta
  * `PI_CODING_AGENT_DIR` env var when set, falling back to `~/.pi/agent`.
  *
  * copillm owns that path via `piAgentDir()` (see `src/config/home.ts`): it
- * defaults to `<COPILLM_HOME>/pi/agent` and copillm exports `PI_CODING_AGENT_DIR`
- * to it when launching pi (see `buildPiEnvBundle`). This keeps copillm out of
- * the user's real `~/.pi`, and makes dev/prod isolation automatic (the dev home
- * relocates it). We still back up any pre-existing file the first time we touch
- * a path, in case the user pointed `PI_CODING_AGENT_DIR` at an existing dir.
+ * defaults to `<COPILLM_HOME>/pi/agent` in shared mode or a profile-namespaced
+ * equivalent when isolated, and copillm exports `PI_CODING_AGENT_DIR` to it
+ * when launching pi (see `buildPiEnvBundle`). This keeps copillm out of the
+ * user's real `~/.pi`. We still back up any pre-existing file the first time
+ * we touch a path, in case the user pointed `PI_CODING_AGENT_DIR` at an existing
+ * dir.
  */
 
 export interface PiInitOptions {
@@ -42,6 +43,10 @@ export interface PiInitOptions {
   pathPrefix?: string;
   /** Discover models as a specific account instead of the default. */
   account?: AccountDiscoveryOverride;
+  /** Resolved session scope for the generated agent home. */
+  sessionScope?: AgentSessionScope;
+  /** Active profile name used when sessionScope is isolated. */
+  profileName?: string | null;
 }
 
 export interface PiInitResult {
@@ -147,7 +152,7 @@ export async function generatePiHome(options: PiInitOptions): Promise<PiInitResu
   writeFileSecureAtomic(mirrorPath, json, 0o600);
 
   // 2. Write the real config pi reads at launch, backing up any pre-existing file.
-  const configPath = piModelsJsonPath();
+  const configPath = piModelsJsonPath(options.sessionScope, options.profileName);
   const backupPath = backupIfMismatch(configPath, json);
   ensureSecureDirectory(path.dirname(configPath));
   writeFileSecureAtomic(configPath, json, 0o600);
@@ -165,13 +170,24 @@ export async function generatePiHome(options: PiInitOptions): Promise<PiInitResu
   };
 }
 
-export function defaultOutputDir(home: string): string {
+export function defaultOutputDir(
+  home: string,
+  sessionScope: AgentSessionScope = "shared",
+  profileName?: string | null
+): string {
+  if (sessionScope === "isolated") {
+    assertSafeProfileName(profileName);
+    return path.join(home, "profiles", profileName, "pi");
+  }
   return path.join(home, "pi");
 }
 
 /** Absolute path to pi's `models.json`, under the copillm-owned pi agent dir. */
-export function piModelsJsonPath(): string {
-  return path.join(piAgentDir(), "models.json");
+export function piModelsJsonPath(
+  sessionScope: AgentSessionScope = "shared",
+  profileName?: string | null
+): string {
+  return path.join(piAgentDir(sessionScope, profileName), "models.json");
 }
 
 /**

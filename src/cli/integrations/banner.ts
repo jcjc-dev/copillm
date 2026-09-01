@@ -60,6 +60,9 @@ export function formatStopHumanLine(
   cache: { cleared: boolean; reason: null | string }
 ): string {
   if (cache.cleared) {
+    if (cache.reason !== null) {
+      return `${primary} Cleared Claude Code gateway cache, but some paths failed: ${cache.reason}.`;
+    }
     return `${primary} Cleared Claude Code gateway cache.`;
   }
   if (cache.reason === "not_present") {

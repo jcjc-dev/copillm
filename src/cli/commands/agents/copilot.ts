@@ -1,8 +1,10 @@
 import type { Command } from "commander";
 import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.js";
+import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
 import { loadStoredCredential } from "../../../auth/credentials.js";
 import { processCopillmArgs } from "../../copillmFlags.js";
 import { launchAgent } from "../../launchAgent.js";
+import { buildCopilotEnvOverlay } from "../../agentEnv.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 
 export function register(program: Command): void {
@@ -15,13 +17,16 @@ export function register(program: Command): void {
     .action(
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
+        const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
+        let sessionScope: SessionScopeResolution;
         let launchAccount;
         try {
+          sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
           launchAccount = await resolveLaunchAccount({
             flag: opts.copillmAccount,
             envValue: process.env.COPILLM_ACCOUNT,
             cwd: process.cwd(),
-            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+            profileOverride
           });
         } catch (error) {
           process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -52,7 +57,7 @@ export function register(program: Command): void {
         const applyResult = applyAgentConfig({
           agent: "copilot",
           cwd: process.cwd(),
-          profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+          profileOverride,
           skip: Boolean(opts.copillmNoConfig)
         });
         for (const line of formatApplyNotes(applyResult, "copilot")) {
@@ -63,6 +68,7 @@ export function register(program: Command): void {
         // COPILOT_GITHUB_TOKEN ahead of its own stored credentials, so this
         // short-circuits its device-flow login when copillm already has a token.
         const env: Record<string, string> = {
+          ...buildCopilotEnvOverlay(sessionScope.scope, sessionScope.profileName),
           ...applyResult.envOverlay,
           COPILOT_GITHUB_TOKEN: githubToken
         };

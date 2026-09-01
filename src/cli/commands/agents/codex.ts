@@ -7,6 +7,7 @@ import { launchAgent } from "../../launchAgent.js";
 import { refreshCodexHome } from "../../integrations/refreshCodex.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
+import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
 
 export function register(program: Command): void {
   program
@@ -19,13 +20,16 @@ export function register(program: Command): void {
       async (forwardedArgs: string[]) => {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
         const debug = resolveCopillmDebug(opts.copillmDebug);
+        const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
+        let sessionScope: SessionScopeResolution;
         let launchAccount;
         try {
+          sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
           launchAccount = await resolveLaunchAccount({
             flag: opts.copillmAccount,
             envValue: process.env.COPILLM_ACCOUNT,
             cwd: process.cwd(),
-            profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null
+            profileOverride
           });
         } catch (error) {
           process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
@@ -39,7 +43,9 @@ export function register(program: Command): void {
         const lock = await ensureDaemonRunningForLauncher({ debug });
         const codex = await refreshCodexHome(lock.port, null, undefined, {
           pathPrefix: launchAccount?.pathPrefix,
-          account: launchAccount?.account
+          account: launchAccount?.account,
+          sessionScope: sessionScope.scope,
+          profileName: sessionScope.profileName
         });
         if (!codex) {
           throw new Error("Failed to prepare Codex home (see warning above).");
@@ -55,7 +61,7 @@ export function register(program: Command): void {
           agent: "codex",
           cwd: process.cwd(),
           codexHomeDir: codex.outDir,
-          profileOverride: opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null,
+          profileOverride,
           skip: Boolean(opts.copillmNoConfig)
         });
         for (const line of formatApplyNotes(applyResult, "codex")) {

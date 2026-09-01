@@ -24,6 +24,10 @@ $ copillm env codex
 export CODEX_HOME="/Users/you/.copillm/codex"
 ```
 
+Use `copillm env codex --profile personal` when the selected profile uses
+`session_scope = "isolated"`; the output then points at that profile's Codex
+home.
+
 `copillm start` already generates `~/.copillm/codex/config.toml` with the right `[model_providers]` block for live discovery against the local proxy.
 
 `--shell fish` and `--shell powershell` are also supported, and `--json` returns a machine-readable payload.

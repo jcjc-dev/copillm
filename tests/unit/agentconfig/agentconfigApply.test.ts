@@ -238,6 +238,71 @@ url = "https://example.com/a"
   });
 });
 
+describe("applyAgentConfig — isolated profile state", () => {
+  it("keeps generated files separate for Claude, Codex, pi, and Copilot", () => {
+    writeGlobal(`
+[profiles.personal]
+session_scope = "isolated"
+
+[profiles.personal.mcp.servers.profile_server]
+transport = "stdio"
+command = "echo"
+args = ["personal"]
+`);
+
+    const profileRoot = path.join(tmpHome, "profiles", "personal");
+    const codexHome = path.join(profileRoot, "codex");
+    fs.mkdirSync(codexHome, { recursive: true });
+    fs.writeFileSync(
+      path.join(codexHome, "config.toml"),
+      [
+        'model = "fake-model"',
+        'model_provider = "copillm"',
+        "",
+        "[model_providers.copillm]",
+        'base_url = "http://127.0.0.1:4141/codex/v1"',
+        ""
+      ].join("\n")
+    );
+
+    const claude = applyAgentConfig({
+      agent: "claude",
+      cwd: tmpCwd,
+      profileOverride: "personal"
+    });
+    const codex = applyAgentConfig({
+      agent: "codex",
+      cwd: tmpCwd,
+      profileOverride: "personal",
+      codexHomeDir: codexHome
+    });
+    const pi = applyAgentConfig({
+      agent: "pi",
+      cwd: tmpCwd,
+      profileOverride: "personal"
+    });
+    const copilot = applyAgentConfig({
+      agent: "copilot",
+      cwd: tmpCwd,
+      profileOverride: "personal"
+    });
+
+    const claudePath = path.join(profileRoot, "claude", "mcp.json");
+    const copilotPath = path.join(profileRoot, "copilot", "mcp-config.json");
+    expect(claude.cliArgs).toEqual(["--mcp-config", claudePath]);
+    expect(fs.existsSync(claudePath)).toBe(true);
+    expect(codex.writes.some((write) => write.path.startsWith(codexHome))).toBe(true);
+    expect(fs.existsSync(path.join(profileRoot, "pi", "agent", "extensions", "copillm-mcp", "servers.json"))).toBe(
+      true
+    );
+    expect(copilot.cliArgs).toEqual(["--additional-mcp-config", `@${copilotPath}`]);
+    expect(fs.existsSync(copilotPath)).toBe(true);
+
+    expect(fs.existsSync(path.join(tmpHome, "claude", "mcp.json"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpHome, "copilot", "mcp-config.json"))).toBe(false);
+  });
+});
+
 describe("applyAgentConfig — skip + no-config", () => {
   it("returns no-op when no agent.toml exists", () => {
     const result = applyAgentConfig({ agent: "claude", cwd: tmpCwd });
