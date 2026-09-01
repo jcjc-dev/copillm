@@ -190,6 +190,9 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       viewError = err instanceof Error ? err : new Error(String(err));
     }
   }
+  if (target && !pin.version && integration.nativeBinaryPackagePrefix) {
+    target = normalizeDiscoveredNativeVersion(target);
+  }
 
   // 3. Cache lookup
   if (target) {
@@ -483,12 +486,33 @@ function nativePlatformBinPath(
   const platformKey = nativePlatformKey();
   if (!platformKey) return null;
   const packageName = `${packagePrefix}-${platformKey}`;
-  const packageDir = path.join(prefix, "node_modules", ...packageName.split("/"));
+  const platformPackageDir = path.join(prefix, "node_modules", ...packageName.split("/"));
   const binary = path.join(
-    packageDir,
+    platformPackageDir,
     process.platform === "win32" ? `${binName}.exe` : binName
   );
-  return fs.existsSync(binary) ? binary : null;
+  if (fs.existsSync(binary)) return binary;
+
+  // Newer native-only packages, such as current Codex releases, publish the
+  // executable under the wrapper package's vendor directory instead of
+  // declaring a package bin or a separate platform dependency.
+  const wrapperPackageDir = path.join(prefix, "node_modules", ...packagePrefix.split("/"));
+  const vendorDir = path.join(wrapperPackageDir, "vendor");
+  if (!fs.existsSync(vendorDir)) return null;
+  const expectedName = process.platform === "win32" ? `${binName}.exe` : binName;
+  const pending = [vendorDir];
+  while (pending.length > 0) {
+    const currentDir = pending.pop()!;
+    for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+      } else if (entry.name === expectedName) {
+        return entryPath;
+      }
+    }
+  }
+  return null;
 }
 
 function declaredNativePackageName(
@@ -528,6 +552,14 @@ function nativePlatformKey(): null | string {
   if (cachedNativePlatformKey !== undefined) return cachedNativePlatformKey;
   cachedNativePlatformKey = computeNativePlatformKey();
   return cachedNativePlatformKey;
+}
+
+function normalizeDiscoveredNativeVersion(version: string): string {
+  const match = version.match(/^(.*)-(linux|darwin|win32)-(x64|arm64)(-musl)?$/);
+  const currentPlatform = nativePlatformKey();
+  if (!match || !currentPlatform) return version;
+  const discoveredPlatform = `${match[2]}-${match[3]}${match[4] ?? ""}`;
+  return discoveredPlatform === currentPlatform ? version : match[1];
 }
 
 function computeNativePlatformKey(): null | string {
@@ -587,10 +619,9 @@ function statIsFile(p: string): boolean {
 }
 
 function probeVersion(binPath: string): null | string {
-  const result = spawnSync(binPath, ["--version"], {
+  const result = spawnSyncSafe(binPath, ["--version"], {
     stdio: ["ignore", "pipe", "pipe"],
-    timeout: 8_000,
-    shell: process.platform === "win32" && /\.(cmd|bat)$/i.test(binPath)
+    timeout: 8_000
   });
   if (result.status !== 0) return null;
   const out = `${result.stdout?.toString() ?? ""}${result.stderr?.toString() ?? ""}`.trim();

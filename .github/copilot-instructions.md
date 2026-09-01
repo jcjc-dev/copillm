@@ -27,7 +27,7 @@ npm run lint               # tsc --noEmit on src/ AND tests/, then eslint src (i
 npm run lint:boundaries    # just the eslint-plugin-boundaries layering check on src/
 npm test                   # vitest run (unit + integration); globalSetup builds dist/ first
 npm run test:e2e:pr        # mock backend + synthetic clients (fast)
-npm run test:e2e:release   # mock backend + real Codex + real Claude Code (installs via npx)
+npm run test:e2e:release   # mock backend + real Codex + real Claude Code (installs in temp prefixes)
 node dist/cli.js start --detach    # run the daemon (cli.js is a thin shim over src/cli/)
 node dist/cli.js stop              # stop daemon (clears Claude gateway cache too)
 node dist/cli.js status            # check daemon + bearer health
@@ -102,7 +102,7 @@ tests/                         # mirrors the src/ layout
   mock-backend/                # standalone HTTP server that mimics Copilot upstream
   e2e/
     pr-gate-runner.ts          # synthetic clients
-    release-runner.ts          # real Codex + Claude Code via npx
+    release-runner.ts          # real Codex + Claude Code in temp prefixes
     clients/                   # codexLikeClient.ts, claudeLikeClient.ts, piLikeClient.ts
 .github/
   workflows/pr-gate.yml        # matrix: ubuntu/macos/windows × Node 20/22 (lint + build + unit + e2e:pr)

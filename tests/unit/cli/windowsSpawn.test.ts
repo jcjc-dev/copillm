@@ -21,6 +21,11 @@ describe("buildWindowsCmdInvocation", () => {
     expect(payload.endsWith('"')).toBe(true);
   });
 
+  it("leaves a bare command name unquoted for npm-style shims", () => {
+    const { args } = buildWindowsCmdInvocation("npm.cmd", ["--version"]);
+    expect(args[3]).toBe('"npm.cmd ^^^"--version^^^""');
+  });
+
   it("escapes spaces with caret so cmd.exe doesn't split the argument", () => {
     const { args } = buildWindowsCmdInvocation("copilot.cmd", ["hello world"]);
     // Double-escape pass: the inner quoting "hello world" becomes
@@ -57,13 +62,15 @@ describe("buildWindowsCmdInvocation", () => {
     expect(payload).toContain("^^)");
   });
 
-  it("escapes the executable path's metacharacters too", () => {
-    // Hypothetical install path with parentheses (e.g. "Program Files (x86)").
+  it("quotes executable paths that contain spaces or grouping characters", () => {
+    // Typical Windows install paths contain spaces (and sometimes grouping
+    // characters, as in "Program Files (x86)").
     const { args } = buildWindowsCmdInvocation(
       "C:\\Program Files (x86)\\node\\copilot.cmd",
       []
     );
-    expect(args[3]).toContain("^(x86^)");
+    expect(args[3]).toContain('"C:\\Program Files (x86)\\node\\copilot.cmd"');
+    expect(args[3]).not.toContain("Program^ Files");
   });
 
   it("preserves backslashes that are not followed by a quote", () => {

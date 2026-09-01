@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { waitForDaemonReady } from "./probes.js";
+import { DAEMON_START_TIMEOUT_MS, waitForDaemonReady } from "./probes.js";
 import { buildSelfSpawnCommand } from "./selfSpawn.js";
 import { daemonSpawnEnv } from "./spawnEnv.js";
 
@@ -24,7 +24,7 @@ export async function spawnDetachedDaemon(input: {
   });
   child.unref();
 
-  const started = await waitForDaemonReady(child.pid ?? null, 8_000);
+  const started = await waitForDaemonReady(child.pid ?? null, DAEMON_START_TIMEOUT_MS);
   if (!started) {
     throw new Error("Detached daemon start timed out.");
   }

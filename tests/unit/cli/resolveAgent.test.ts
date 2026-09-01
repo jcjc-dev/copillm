@@ -408,7 +408,7 @@ describe("resolveAgent (install args)", async () => {
    * for `view`/`install`. For `install`, it also stages the cache layout the
    * resolver expects so the smoke-test passes.
    */
-  function recordingNpm(dir: string, argvPath: string): string {
+  function recordingNpm(dir: string, argvPath: string, latestVersion = "1.2.3"): string {
     fs.mkdirSync(dir, { recursive: true });
     if (process.platform === "win32") {
       // Minimal Node-backed shim — record argv, then mimic a successful npm
@@ -428,7 +428,7 @@ if (argv[0] === 'install') {
   const binPath = path.join(binDir, 'codex.cmd');
   fs.writeFileSync(binPath, '@echo 0.0.1\\r\\n');
 }
-if (argv[0] === 'view') process.stdout.write('1.2.3\\n');
+if (argv[0] === 'view') process.stdout.write(${JSON.stringify(latestVersion)} + "\\n");
 process.exit(0);
 `
       );
@@ -452,7 +452,7 @@ if (argv[0] === 'install') {
   const binPath = path.join(binDir, 'codex');
   fs.writeFileSync(binPath, '#!/bin/sh\\necho 0.0.1\\n', { mode: 0o755 });
 }
-if (argv[0] === 'view') process.stdout.write('1.2.3\\n');
+if (argv[0] === 'view') process.stdout.write(${JSON.stringify(latestVersion)} + "\\n");
 process.exit(0);
 `,
       { mode: 0o755 }
@@ -519,6 +519,28 @@ process.exit(0);
     return shPath;
   }
 
+  function nativeCodexNpm(dir: string): string {
+    fs.mkdirSync(dir, { recursive: true });
+    const jsPath = path.join(dir, "fake-native-codex-npm.cjs");
+    fs.writeFileSync(
+      jsPath,
+      `const fs = require('node:fs');
+const path = require('node:path');
+const argv = process.argv.slice(2);
+if (argv[0] === 'install') {
+  const prefix = argv[argv.indexOf('--prefix') + 1];
+  const binDir = path.join(prefix, 'node_modules', '@openai', 'codex', 'vendor', 'x86_64-pc-windows-msvc', 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.copyFileSync(process.execPath, path.join(binDir, 'codex.exe'));
+}
+process.exit(0);
+`
+    );
+    const cmdPath = path.join(dir, "fake-native-codex-npm.cmd");
+    fs.writeFileSync(cmdPath, `@node "${jsPath}" %*\r\n`);
+    return cmdPath;
+  }
+
   it("passes --ignore-scripts to npm install", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-argv-"));
     try {
@@ -570,6 +592,31 @@ process.exit(0);
     }
   });
 
+  it("normalizes a discovered Codex platform package to its portable wrapper on Windows", async () => {
+    if (process.platform !== "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-native-version-"));
+    try {
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const discoveredVersion = `1.2.3-win32-${process.arch === "arm64" ? "x64" : "arm64"}`;
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog, discoveredVersion);
+
+      await resolveAgent("codex", {
+        cacheRoot: path.join(tmp, "cache"),
+        npmExecutable: npmExe
+      });
+
+      const recorded = fs
+        .readFileSync(argvLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      const installCall = recorded.find((argv) => argv[0] === "install")!;
+      expect(installCall.at(-1)).toBe("@openai/codex@1.2.3");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("uses a declared native platform package without running postinstall", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-native-claude-"));
     try {
@@ -589,6 +636,36 @@ process.exit(0);
       const cached = await resolveAgent("claude", {
         cacheRoot,
         pinnedSpec: "2.1.209",
+        offline: true
+      });
+      expect(cached.source).toBe("cache");
+      expect(cached.binPath).toBe(installed.binPath);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("uses a bundled Codex binary when the package has no npm bin", async () => {
+    if (process.platform !== "win32") return;
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-native-codex-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const npmExecutable = nativeCodexNpm(path.join(tmp, "fakenpm"));
+      const version = "0.150.0-alpha.9-win32-x64";
+
+      const installed = await resolveAgent("codex", {
+        cacheRoot,
+        npmExecutable,
+        pinnedSpec: version
+      });
+
+      expect(installed.source).toBe("installed");
+      expect(installed.binPath).toContain(`${path.sep}vendor${path.sep}`);
+      expect(path.basename(installed.binPath)).toBe("codex.exe");
+
+      const cached = await resolveAgent("codex", {
+        cacheRoot,
+        pinnedSpec: version,
         offline: true
       });
       expect(cached.source).toBe("cache");

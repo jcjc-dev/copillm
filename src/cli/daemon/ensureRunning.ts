@@ -5,7 +5,12 @@ import type { LockFileData } from "../../types/index.js";
 import { currentDebugLogPath } from "../shared/debug.js";
 import { displayHomePath } from "../integrations/banner.js";
 import { isPidAlive } from "./lifecycle.js";
-import { readLiveLock, waitForDaemonReady, warnIfDebugRequestedButInactive } from "./probes.js";
+import {
+  DAEMON_START_TIMEOUT_MS,
+  readLiveLock,
+  waitForDaemonReady,
+  warnIfDebugRequestedButInactive
+} from "./probes.js";
 import { daemonSpawnEnv } from "./spawnEnv.js";
 import { buildSelfSpawnCommand } from "./selfSpawn.js";
 
@@ -61,7 +66,7 @@ export async function ensureDaemonRunningForLauncher(opts: { debug: boolean }): 
     return tail ? `\nDaemon stderr (tail):\n${tail}` : "";
   };
 
-  const started = await waitForDaemonReady(child.pid ?? null, 10_000);
+  const started = await waitForDaemonReady(child.pid ?? null, DAEMON_START_TIMEOUT_MS);
   if (!started) {
     if (child.pid !== undefined && !isPidAlive(child.pid)) {
       throw new Error(`copillm daemon exited before becoming ready.${formatStderrTail()}`);

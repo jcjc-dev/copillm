@@ -14,8 +14,11 @@ function escapeArgument(arg: string, doubleEscapeMetaChars: boolean): string {
   return escaped;
 }
 
-function escapeCommand(command: string): string {
-  return command.replace(META_CHARS, "^$1");
+function quoteCommand(command: string): string {
+  // The command path is a single token. Quoting it is required for normal
+  // Windows installations such as `C:\Program Files\nodejs`; escaping its
+  // spaces with carets would make the path itself invalid.
+  return /[\s()\[\]%!^"`<>&|;,]/.test(command) ? `"${command}"` : command;
 }
 
 /**
@@ -48,9 +51,9 @@ export function buildWindowsCmdInvocation(
   args: string[],
   doubleEscape = true
 ): { command: string; args: string[] } {
-  const escapedCommand = escapeCommand(file);
+  const quotedCommand = quoteCommand(file);
   const escapedArgs = args.map((a) => escapeArgument(a, doubleEscape));
-  const commandLine = [escapedCommand, ...escapedArgs].join(" ");
+  const commandLine = [quotedCommand, ...escapedArgs].join(" ");
   const comspec = process.env.ComSpec || process.env.comspec || "cmd.exe";
   return {
     command: comspec,
