@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { buildWindowsCmdInvocation } from "../../src/cli/windowsSpawn.js";
 
 export type AgentName = "codex" | "claude" | "pi";
 
@@ -117,10 +118,9 @@ export function buildAgentStubTarball(opts: {
   fs.writeFileSync(path.join(stagingDir, "package.json"), JSON.stringify(pkgJson, null, 2));
 
   // Run `npm pack` to produce a tarball
-  const packResult = spawnSync("npm", ["pack", "--silent"], {
+  const packResult = spawnNpm(["pack", "--silent"], {
     cwd: stagingDir,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: process.platform === "win32"
+    stdio: ["ignore", "pipe", "pipe"]
   });
   if (packResult.status !== 0) {
     throw new Error(`npm pack failed in ${stagingDir}: ${packResult.stderr?.toString() ?? "(no stderr)"}`);
@@ -165,7 +165,9 @@ export function createFakeNpm(opts: {
     `const REAL = ${JSON.stringify(realNpm ?? "")};\n` +
     `function delegate() {\n` +
     `  if (!REAL) { process.stderr.write("fake-npm: real npm not located, refusing\\n"); process.exit(1); }\n` +
-    `  const r = spawnSync(REAL, argv, { stdio: "inherit", shell: process.platform === "win32" });\n` +
+    `  const r = process.platform === "win32"\n` +
+    `    ? spawnSync(process.execPath, [REAL, ...argv], { stdio: "inherit", shell: false })\n` +
+    `    : spawnSync(REAL, argv, { stdio: "inherit", shell: false });\n` +
     `  process.exit(r.status ?? 1);\n` +
     `}\n` +
     `if (argv[0] === "view" && argv[1] === PKG && argv[2] === "version") {\n` +
@@ -176,7 +178,10 @@ export function createFakeNpm(opts: {
     `  const prefix = prefixIdx >= 0 ? argv[prefixIdx + 1] : null;\n` +
     `  const spec = argv[argv.length - 1];\n` +
     `  if (prefix && spec === PKG + "@" + VER) {\n` +
-    `    const r = spawnSync(REAL, ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--omit=dev", TARBALL], { stdio: "inherit", shell: process.platform === "win32" });\n` +
+    `    const installArgs = ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--omit=dev", TARBALL];\n` +
+    `    const r = process.platform === "win32"\n` +
+    `      ? spawnSync(process.execPath, [REAL, ...installArgs], { stdio: "inherit", shell: false })\n` +
+    `      : spawnSync(REAL, installArgs, { stdio: "inherit", shell: false });\n` +
     `    process.exit(r.status ?? 1);\n` +
     `  }\n` +
     `}\n` +
@@ -214,11 +219,30 @@ function locateRealNpm(): null | string {
     for (const ext of exts) {
       const candidate = path.join(dir, `npm${ext}`);
       try {
-        if (fs.statSync(candidate).isFile()) return candidate;
+        if (!fs.statSync(candidate).isFile()) continue;
+        if (process.platform === "win32") {
+          const npmCli = path.join(path.dirname(candidate), "node_modules", "npm", "bin", "npm-cli.js");
+          if (fs.statSync(npmCli, { throwIfNoEntry: false })?.isFile()) return npmCli;
+        }
+        return candidate;
       } catch {
         // not here
       }
     }
   }
   return null;
+}
+
+function spawnNpm(
+  args: string[],
+  options: { cwd: string; stdio: ["ignore", "pipe", "pipe"] }
+) {
+  if (process.platform !== "win32") {
+    return spawnSync("npm", args, options);
+  }
+  const { command, args: cmdArgs } = buildWindowsCmdInvocation("npm.cmd", args);
+  return spawnSync(command, cmdArgs, {
+    ...options,
+    windowsVerbatimArguments: true
+  });
 }

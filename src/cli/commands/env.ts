@@ -67,7 +67,7 @@ export function register(program: Command): void {
         } else {
           process.stdout.write(`${block}\n`);
         }
-        process.exit(0);
+        return;
       }
 
       if (agent === "pi") {
@@ -105,7 +105,7 @@ export function register(program: Command): void {
         } else {
           process.stdout.write(`${block}\n`);
         }
-        process.exit(0);
+        return;
       }
 
       const claude = buildClaudeExportCommand(lockState.lock.port, null);
@@ -119,7 +119,7 @@ export function register(program: Command): void {
         for (const line of formatSettingsConflictWarning(settingsConflicts)) {
           process.stderr.write(`${line}\n`);
         }
-        process.exit(0);
+        return;
       }
       const block = renderEnvBlock({
         agent: "claude",
@@ -150,6 +150,6 @@ export function register(program: Command): void {
       for (const line of formatSettingsConflictWarning(settingsConflicts)) {
         process.stderr.write(`${line}\n`);
       }
-      process.exit(0);
+      return;
     });
 }

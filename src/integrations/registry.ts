@@ -12,7 +12,11 @@ export const AGENT_REGISTRY: Record<AgentName, AgentIntegration> = {
     binName: "claude",
     nativeBinaryPackagePrefix: "@anthropic-ai/claude-code"
   },
-  codex:   { npmPackage: "@openai/codex",                   binName: "codex"   },
+  codex:   {
+    npmPackage: "@openai/codex",
+    binName: "codex",
+    nativeBinaryPackagePrefix: "@openai/codex"
+  },
   pi:      { npmPackage: "@earendil-works/pi-coding-agent", binName: "pi"      },
   copilot: { npmPackage: "@github/copilot",                 binName: "copilot" },
 };

@@ -13,17 +13,19 @@ const isWindows = process.platform === "win32";
 
 describe.runIf(isWindows)("buildWindowsCmdInvocation — real cmd.exe round-trip", () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-spawn-test-"));
+  const commandDir = path.join(tmp, "path with spaces");
+  fs.mkdirSync(commandDir, { recursive: true });
 
   // Create a minimal npm-style shim: a .cmd that calls node with our printer
   // script, passing %* through. This mirrors the structure of
   // node_modules/.bin/<tool>.cmd that we hit in production.
-  const printerJs = path.join(tmp, "printer.js");
+  const printerJs = path.join(commandDir, "printer.js");
   fs.writeFileSync(
     printerJs,
     `process.stdout.write(JSON.stringify(process.argv.slice(2)));\n`,
     "utf8"
   );
-  const shimCmd = path.join(tmp, "printer.cmd");
+  const shimCmd = path.join(commandDir, "printer.cmd");
   fs.writeFileSync(
     shimCmd,
     `@echo off\r\nnode "${printerJs}" %*\r\n`,

@@ -17,6 +17,13 @@ import { isPidAlive } from "./lifecycle.js";
  */
 const LOOPBACK_PROBE_BACKOFF_MS = 100;
 
+/**
+ * Daemon startup includes credential exchange before the health endpoint is
+ * available. Keep enough margin for slow process and filesystem startup on
+ * hosted Windows runners while still failing promptly when the daemon dies.
+ */
+export const DAEMON_START_TIMEOUT_MS = 30_000;
+
 interface ProbeRetryOptions {
   attempts?: number;
   backoffMs?: number;
