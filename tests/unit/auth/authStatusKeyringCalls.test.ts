@@ -120,6 +120,10 @@ async function runAuthStatus(args: string[]): Promise<{ stdout: string; exitCode
     (process as { exit: typeof originalExit }).exit = originalExit;
   }
 
+  if (exitCode === null && typeof process.exitCode === "number") {
+    exitCode = process.exitCode;
+  }
+  process.exitCode = undefined;
   return { stdout: writes.join(""), exitCode };
 }
 
