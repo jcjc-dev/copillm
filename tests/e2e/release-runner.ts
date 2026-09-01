@@ -158,7 +158,12 @@ async function runCodexCli(
     }
     return await runCommand([executable, ...args], options);
   } finally {
-    fs.rmSync(installRoot, { recursive: true, force: true });
+    // Native Codex can release Windows file handles shortly after process close.
+    fs.rmSync(installRoot, {
+      recursive: true,
+      force: true,
+      ...(process.platform === "win32" ? { maxRetries: 20, retryDelay: 250 } : {})
+    });
   }
 }
 
