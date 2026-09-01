@@ -132,8 +132,8 @@ export function buildAgentStubTarball(opts: {
 
 /**
  * Build a fake `npm` shim that intercepts the two commands resolveAgent uses:
- *   - `npm view <pkg> version` → prints the configured version
- *   - `npm install --prefix <dir> --no-audit --no-fund --omit=dev <pkg>@<ver>`
+ *   - `npm view [--userconfig <path>] <pkg> version` → prints the configured version
+ *   - `npm install [--userconfig <path>] --prefix <dir> --no-audit --no-fund --omit=dev <pkg>@<ver>`
  *     → installs by copying a prepared tarball
  *
  * The shim defers all other invocations to the real npm.
@@ -163,6 +163,9 @@ export function createFakeNpm(opts: {
     `const VER = ${JSON.stringify(opts.version)};\n` +
     `const TARBALL = ${JSON.stringify(opts.tarballPath)};\n` +
     `const REAL = ${JSON.stringify(realNpm ?? "")};\n` +
+    `const forwardedArgv = argv.slice();\n` +
+    `const userConfigIdx = forwardedArgv.indexOf("--userconfig");\n` +
+    `if (userConfigIdx >= 0) forwardedArgv.splice(userConfigIdx, 2);\n` +
     `function delegate() {\n` +
     `  if (!REAL) { process.stderr.write("fake-npm: real npm not located, refusing\\n"); process.exit(1); }\n` +
     `  const r = process.platform === "win32"\n` +
@@ -170,13 +173,13 @@ export function createFakeNpm(opts: {
     `    : spawnSync(REAL, argv, { stdio: "inherit", shell: false });\n` +
     `  process.exit(r.status ?? 1);\n` +
     `}\n` +
-    `if (argv[0] === "view" && argv[1] === PKG && argv[2] === "version") {\n` +
+    `if (forwardedArgv[0] === "view" && forwardedArgv[1] === PKG && forwardedArgv[2] === "version") {\n` +
     `  process.stdout.write(VER + "\\n"); process.exit(0);\n` +
     `}\n` +
-    `if (argv[0] === "install") {\n` +
-    `  const prefixIdx = argv.indexOf("--prefix");\n` +
-    `  const prefix = prefixIdx >= 0 ? argv[prefixIdx + 1] : null;\n` +
-    `  const spec = argv[argv.length - 1];\n` +
+    `if (forwardedArgv[0] === "install") {\n` +
+    `  const prefixIdx = forwardedArgv.indexOf("--prefix");\n` +
+    `  const prefix = prefixIdx >= 0 ? forwardedArgv[prefixIdx + 1] : null;\n` +
+    `  const spec = forwardedArgv[forwardedArgv.length - 1];\n` +
     `  if (prefix && spec === PKG + "@" + VER) {\n` +
     `    const installArgs = ["install", "--prefix", prefix, "--no-audit", "--no-fund", "--omit=dev", TARBALL];\n` +
     `    const r = process.platform === "win32"\n` +
