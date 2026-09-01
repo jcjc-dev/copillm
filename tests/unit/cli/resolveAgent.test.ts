@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { InvalidPinSpecError, parsePinSpec, packageNameFor, binNameFor } from "../../../src/cli/resolveAgent.js";
+import {
+  InvalidPinSpecError,
+  parsePinSpec,
+  packageNameFor,
+  binNameFor,
+  resolveNpmUserConfigPath
+} from "../../../src/cli/resolveAgent.js";
 
 describe("parsePinSpec", () => {
   it("returns default package + null version for empty input", () => {
@@ -118,6 +124,33 @@ describe("packageNameFor / binNameFor", () => {
     expect(binNameFor("claude")).toBe("claude");
     expect(binNameFor("pi")).toBe("pi");
     expect(binNameFor("copilot")).toBe("copilot");
+  });
+});
+
+describe("resolveNpmUserConfigPath", () => {
+  it("uses an existing user-level .npmrc without reading its registry value", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-npmrc-"));
+    try {
+      const userConfigPath = path.join(tmp, ".npmrc");
+      fs.writeFileSync(userConfigPath, "");
+
+      expect(resolveNpmUserConfigPath({}, tmp)).toBe(userConfigPath);
+      expect(resolveNpmUserConfigPath({}, path.join(tmp, "missing"))).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("honors npm's custom userconfig environment setting", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-npmrc-env-"));
+    try {
+      const userConfigPath = path.join(tmp, "user.npmrc");
+      fs.writeFileSync(userConfigPath, "");
+
+      expect(resolveNpmUserConfigPath({ npm_config_userconfig: userConfigPath }, tmp)).toBe(userConfigPath);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -559,6 +592,48 @@ process.exit(0);
       expect(installCall, `expected an install call. Got: ${JSON.stringify(recorded)}`).toBeDefined();
       expect(installCall).toContain("--ignore-scripts");
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("passes an existing user-level npmrc to version lookup and install", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-userconfig-"));
+    const previousLowerUserConfig = process.env.npm_config_userconfig;
+    const previousUpperUserConfig = process.env.NPM_CONFIG_USERCONFIG;
+    try {
+      const userConfigPath = path.join(tmp, "user.npmrc");
+      fs.writeFileSync(userConfigPath, "");
+      process.env.npm_config_userconfig = userConfigPath;
+      process.env.NPM_CONFIG_USERCONFIG = userConfigPath;
+
+      const argvLog = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvLog);
+      await resolveAgent("codex", {
+        cacheRoot: path.join(tmp, "cache"),
+        npmExecutable: npmExe
+      });
+
+      const recorded = fs
+        .readFileSync(argvLog, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as string[]);
+      for (const call of recorded) {
+        expect(call).toContain("--userconfig");
+        expect(call).toContain(userConfigPath);
+        expect(call).not.toContain("--registry");
+      }
+    } finally {
+      if (previousLowerUserConfig === undefined) {
+        delete process.env.npm_config_userconfig;
+      } else {
+        process.env.npm_config_userconfig = previousLowerUserConfig;
+      }
+      if (previousUpperUserConfig === undefined) {
+        delete process.env.NPM_CONFIG_USERCONFIG;
+      } else {
+        process.env.NPM_CONFIG_USERCONFIG = previousUpperUserConfig;
+      }
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });

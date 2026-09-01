@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { spawnSync, type SpawnSyncOptionsWithBufferEncoding } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -155,6 +156,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const pkg = pin.packageName;
   const binName = integration.binName;
   const agentRoot = path.join(cacheRoot, agent);
+  const npmUserConfigPath = resolveNpmUserConfigPath();
 
   // 1. PATH lookup (opt-in only).
   // PATH lookup is OFF by default so the running agent version is always the one copillm
@@ -185,7 +187,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   let viewError: null | Error = null;
   if (!target && !opts.offline) {
     try {
-      target = npmViewLatest(npmExe, pkg);
+      target = npmViewLatest(npmExe, pkg, npmUserConfigPath);
     } catch (err) {
       viewError = err instanceof Error ? err : new Error(String(err));
     }
@@ -311,7 +313,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       "--ignore-scripts",
       spec
     ];
-    const installResult = spawnSyncSafe(npmExe, installArgs, {
+    const installResult = spawnSyncSafe(npmExe, withNpmUserConfig(installArgs, npmUserConfigPath), {
       stdio: ["ignore", "inherit", "inherit"]
     });
     if (installResult.status !== 0) {
@@ -629,8 +631,8 @@ function probeVersion(binPath: string): null | string {
   return m ? m[1] : (out.length > 0 ? out.split(/\s+/)[0] : null);
 }
 
-function npmViewLatest(npmExe: string, pkg: string): string {
-  const result = spawnSyncSafe(npmExe, ["view", pkg, "version"], {
+function npmViewLatest(npmExe: string, pkg: string, userConfigPath: null | string): string {
+  const result = spawnSyncSafe(npmExe, withNpmUserConfig(["view", pkg, "version"], userConfigPath), {
     stdio: ["ignore", "pipe", "pipe"],
     timeout: 30_000
   });
@@ -642,6 +644,40 @@ function npmViewLatest(npmExe: string, pkg: string): string {
   const v = result.stdout?.toString().trim();
   if (!v) throw new Error(`Empty response from \`npm view ${pkg} version\``);
   return v;
+}
+
+/**
+ * npm normally discovers this file itself. Passing the existing path
+ * explicitly keeps agent metadata lookups and installs on the same user
+ * configuration without checking in or inventing a registry URL.
+ */
+export function resolveNpmUserConfigPath(
+  env: NodeJS.ProcessEnv = process.env,
+  homeDir: string = os.homedir()
+): null | string {
+  const configured = env.npm_config_userconfig ?? env.NPM_CONFIG_USERCONFIG;
+  const candidate = configured && configured.trim().length > 0
+    ? expandHomePath(configured.trim(), homeDir)
+    : path.join(homeDir, ".npmrc");
+  const resolved = path.resolve(candidate);
+  try {
+    return fs.statSync(resolved).isFile() ? resolved : null;
+  } catch {
+    return null;
+  }
+}
+
+function withNpmUserConfig(args: string[], userConfigPath: null | string): string[] {
+  if (!userConfigPath) return args;
+  return [args[0], "--userconfig", userConfigPath, ...args.slice(1)];
+}
+
+function expandHomePath(value: string, homeDir: string): string {
+  if (value === "~") return homeDir;
+  if (value.startsWith("~/") || value.startsWith("~\\")) {
+    return path.join(homeDir, value.slice(2));
+  }
+  return value;
 }
 
 /**
