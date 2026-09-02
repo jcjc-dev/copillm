@@ -41,6 +41,8 @@ copillm --debug pi                   # copillm daemon diagnostics
 
 ## What it does
 
+When the active profile has no external provider:
+
 1. Starts the copillm daemon in the background if it is not already running.
 2. Refreshes pi's copillm model list in copillm's own agent dir (`~/.copillm/pi/agent` in shared mode, or the selected profile's isolated directory, via `PI_CODING_AGENT_DIR`) so pi sees the live Copilot catalogue. copillm never writes your real `~/.pi`.
 3. Resolves the pi binary in this order:
@@ -53,6 +55,14 @@ copillm --debug pi                   # copillm daemon diagnostics
    Version checks are cached for 24 hours. When a check is due and a cached version is available, copillm launches the newest cached install immediately and refreshes version information in the background. If a newer version is found, it is installed on a later launch. A first launch with no cached install still needs to check for and download a version.
 4. Injects the environment variables pi requires to talk to the local daemon.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
+
+When the active profile contains `[profiles.<name>.provider]`, copillm
+instead writes a single external provider to pi's copillm-owned
+`models.json`, does not start the daemon, and does not require a GitHub
+credential. The provider's selected API, model, context/output limits,
+reasoning setting, and compatibility options are applied to pi. The
+credential is referenced by environment-variable name and is not written to
+`models.json`.
 
 For MCP fan-out into pi, see [MCP & `agent.toml`](../../mcp/#pi).
 

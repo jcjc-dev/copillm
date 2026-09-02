@@ -26,5 +26,10 @@ nav_order: 9
 | `CLAUDE_CONFIG_DIR` | Set by copillm when it launches Claude, pointing Claude at the generated shared or profile-isolated config/session home. |
 | `PI_CODING_AGENT_DIR` | Set by copillm when it launches pi, pointing pi at the generated shared or profile-isolated agent home. |
 | `COPILOT_HOME` | Set by copillm only for an isolated Copilot profile; in shared mode Copilot CLI keeps its normal home. |
+| `COPILOT_PROVIDER_BASE_URL` | Set for an external-provider `copillm copilot` launch. |
+| `COPILOT_PROVIDER_TYPE` | External Copilot provider family: `openai`, `azure`, or `anthropic`. |
+| `COPILOT_MODEL` | Model selected by the active external-provider profile for Copilot CLI. |
+| `COPILOT_PROVIDER_API_KEY` | Set in the Copilot child process from the provider's `api_key_env` reference; never written to `agent.toml`. |
+| `COPILOT_OFFLINE` | Set from the external provider's `offline` setting. |
 | `COPILLM_MAX_REQUEST_BYTES` | Maximum accepted request body size, in bytes. Default `33554432` (32 MiB). Oversized requests are rejected with HTTP `413 payload_too_large` — see the [HTTP API reference](../../http-api/#daemon-side-request-errors). |
 | `ANTHROPIC_BASE_URL` | Set automatically by `copillm claude`. You normally do not set this yourself. |

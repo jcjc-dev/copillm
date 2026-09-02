@@ -6,6 +6,7 @@ import { getCopillmHome } from "../config/home.js";
 import {
   AgentTomlSchema,
   type AgentToml,
+  type ExternalProviderConfig,
   type McpServerEntry,
   type ResolvedProfile,
   type SessionScope,
@@ -149,6 +150,16 @@ function mergeAndResolve(input: {
       ? { body: instructionsBody }
       : null;
 
+  // A provider is a complete profile-level selection. Later layers replace
+  // the earlier provider so a project overlay cannot accidentally combine an
+  // endpoint from one provider with credentials or model metadata from another.
+  let provider: ExternalProviderConfig | null = null;
+  for (const { section } of layers) {
+    if (section.provider !== undefined) {
+      provider = section.provider;
+    }
+  }
+
   // Merge the pinned account: later layers (project over global, profile over
   // defaults) win. Empty string is treated as unset.
   let account: string | null = null;
@@ -182,7 +193,7 @@ function mergeAndResolve(input: {
   const yolo = mergeYolo(sections);
   const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, account, sessionScope, yolo, reserved };
+  return { instructions, mcpServers: servers, provider, account, sessionScope, yolo, reserved };
 }
 
 interface ScopedSection {

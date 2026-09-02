@@ -23,6 +23,7 @@ import { resolveRestartDecision, type DaemonLockState } from "../daemon/restart.
 import { selfUpdateToLatest, describeSelfUpdate, type SelfUpdateResult } from "../daemon/selfUpdate.js";
 import { computeVersionStatus, type VersionStatusFields } from "../daemon/versionStatus.js";
 import { getPackageInfo } from "../../config/packageInfo.js";
+import { loadAgentConfig } from "../../agentconfig/load.js";
 import { resolveSessionScope } from "../../agentconfig/sessionScope.js";
 
 export function register(program: Command): void {
@@ -54,9 +55,14 @@ export function register(program: Command): void {
         const existingLock = await readLiveLock();
         if (existingLock) {
           const activeDebug = await warnIfDebugRequestedButInactive(debug, existingLock.port);
-          const shared = await loadSharedStartContextIfNeeded(opts);
-          const codex = opts.codex === false ? null : await refreshCodexHome(existingLock.port, opts.codexModel ?? null, shared);
-          const pi = opts.pi === false ? null : await refreshPiHome(existingLock.port, shared);
+          const generateAgentConfigs = !hasExternalProviderProfile();
+          const shared = generateAgentConfigs ? await loadSharedStartContextIfNeeded(opts) : undefined;
+          const codex = !generateAgentConfigs || opts.codex === false
+            ? null
+            : await refreshCodexHome(existingLock.port, opts.codexModel ?? null, shared);
+          const pi = !generateAgentConfigs || opts.pi === false
+            ? null
+            : await refreshPiHome(existingLock.port, shared);
           const claude = buildClaudeExportCommand(existingLock.port, null);
           const banner = formatStartBanner({
             port: existingLock.port,
@@ -99,9 +105,14 @@ export function register(program: Command): void {
       const started = await runDaemon({ debug });
       if (started.kind === "already_running") {
         const activeDebug = await warnIfDebugRequestedButInactive(debug, started.lock.port);
-        const sharedAlready = await loadSharedStartContextIfNeeded(opts);
-        const codex = opts.codex === false ? null : await refreshCodexHome(started.lock.port, opts.codexModel ?? null, sharedAlready);
-        const pi = opts.pi === false ? null : await refreshPiHome(started.lock.port, sharedAlready);
+        const generateAgentConfigs = !hasExternalProviderProfile();
+        const sharedAlready = generateAgentConfigs ? await loadSharedStartContextIfNeeded(opts) : undefined;
+        const codex = !generateAgentConfigs || opts.codex === false
+          ? null
+          : await refreshCodexHome(started.lock.port, opts.codexModel ?? null, sharedAlready);
+        const pi = !generateAgentConfigs || opts.pi === false
+          ? null
+          : await refreshPiHome(started.lock.port, sharedAlready);
         const claude = buildClaudeExportCommand(started.lock.port, null);
         const banner = formatStartBanner({
           port: started.lock.port,
@@ -133,9 +144,14 @@ export function register(program: Command): void {
         return;
       }
 
-      const sharedForeground = await loadSharedStartContextIfNeeded(opts);
-      const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, sharedForeground);
-      const pi = opts.pi === false ? null : await refreshPiHome(started.port, sharedForeground);
+      const generateAgentConfigs = !hasExternalProviderProfile();
+      const sharedForeground = generateAgentConfigs ? await loadSharedStartContextIfNeeded(opts) : undefined;
+      const codex = !generateAgentConfigs || opts.codex === false
+        ? null
+        : await refreshCodexHome(started.port, opts.codexModel ?? null, sharedForeground);
+      const pi = !generateAgentConfigs || opts.pi === false
+        ? null
+        : await refreshPiHome(started.port, sharedForeground);
       const claude = buildClaudeExportCommand(started.port, started.callerSecret);
       const banner = formatStartBanner({
         port: started.port,
@@ -475,9 +491,14 @@ async function emitDetachedStartOutput(
     selfUpdate?: SelfUpdateResult;
   }
 ): Promise<void> {
-  const shared = await loadSharedStartContextIfNeeded(opts);
-  const codex = opts.codex === false ? null : await refreshCodexHome(started.port, opts.codexModel ?? null, shared);
-  const pi = opts.pi === false ? null : await refreshPiHome(started.port, shared);
+  const generateAgentConfigs = !hasExternalProviderProfile();
+  const shared = generateAgentConfigs ? await loadSharedStartContextIfNeeded(opts) : undefined;
+  const codex = !generateAgentConfigs || opts.codex === false
+    ? null
+    : await refreshCodexHome(started.port, opts.codexModel ?? null, shared);
+  const pi = !generateAgentConfigs || opts.pi === false
+    ? null
+    : await refreshPiHome(started.port, shared);
   const claude = buildClaudeExportCommand(started.port, null);
   const banner = formatStartBanner({
     port: started.port,
@@ -521,6 +542,12 @@ async function emitDetachedStartOutput(
     payload.self_update = extra.selfUpdate;
   }
   writeCommandOutput(opts, banner, payload);
+}
+
+function hasExternalProviderProfile(): boolean {
+  const profileOverride = process.env.COPILLM_PROFILE ?? null;
+  const loaded = loadAgentConfig({ cwd: process.cwd(), profileOverride });
+  return Boolean(loaded?.resolved.provider);
 }
 
 /** Narrow the lock inspection down to the shape `resolveRestartDecision` needs. */
