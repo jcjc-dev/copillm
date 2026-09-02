@@ -21,10 +21,12 @@ export function applyAgentConfig(opts: ApplyOptions): ApplyResult {
   if (opts.skip) {
     return { active: null, writes: [], envOverlay: {}, cliArgs: [], notes: [], sources: [], yolo: null };
   }
-  const load: LoadResult | null = loadAgentConfig({
-    cwd: opts.cwd,
-    profileOverride: opts.profileOverride ?? null
-  });
+  const load: LoadResult | null =
+    opts.loaded ??
+    loadAgentConfig({
+      cwd: opts.cwd,
+      profileOverride: opts.profileOverride ?? null
+    });
   if (!load) {
     return { active: null, writes: [], envOverlay: {}, cliArgs: [], notes: [], sources: [], yolo: null };
   }

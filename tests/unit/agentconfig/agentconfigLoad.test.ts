@@ -219,6 +219,69 @@ body = "project"
     expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.instructions?.body).toBe("project");
   });
 
+  describe("external provider", () => {
+    it("loads the unified provider block and applies defaults", () => {
+      writeGlobal(`
+[profiles.default.provider]
+id = "local-llm"
+base_url = "http://127.0.0.1:8000/v1"
+model = "local-test-model"
+api_key_env = "LOCAL_LLM_API_KEY"
+supports_responses = true
+
+[profiles.default.provider.pi]
+api = "openai-completions"
+`);
+
+      const provider = loadAgentConfig({ cwd: tmpCwd })?.resolved.provider;
+      expect(provider).toMatchObject({
+        id: "local-llm",
+        type: "openai",
+        base_url: "http://127.0.0.1:8000/v1",
+        model: "local-test-model",
+        api_key_env: "LOCAL_LLM_API_KEY",
+        reasoning: false,
+        tool_calling: true,
+        streaming: true,
+        supports_chat_completions: true,
+        supports_responses: true,
+        pi: { api: "openai-completions" }
+      });
+    });
+
+    it("replaces a complete provider when a project profile overrides it", () => {
+      writeGlobal(`
+[profiles.default.provider]
+id = "global"
+base_url = "http://127.0.0.1:8000/v1"
+model = "global-model"
+`);
+      writeProject(`
+[profiles.default.provider]
+id = "project"
+base_url = "http://127.0.0.1:9000/v1"
+model = "project-model"
+`);
+
+      expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.provider).toMatchObject({
+        id: "project",
+        base_url: "http://127.0.0.1:9000/v1",
+        model: "project-model"
+      });
+    });
+
+    it("rejects unsafe provider ids, URLs, and environment variable names", () => {
+      writeGlobal(`
+[profiles.default.provider]
+id = "bad/provider"
+base_url = "ftp://127.0.0.1:8000/v1"
+model = "model"
+api_key_env = "not-a-valid-name"
+`);
+      expect(() => loadAgentConfig({ cwd: tmpCwd })).toThrow(AgentConfigError);
+    });
+  });
+
   describe("yolo merge", () => {
     it("returns null yolo when no layer declares the block", () => {
       writeGlobal(`active_profile = "default"\n[profiles.default]\n`);

@@ -3,12 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { AgentConfigError, type LoadResult } from "./load.js";
-import type { McpServerEntry, ResolvedProfile, YoloConfig } from "./schema.js";
+import type {
+  ExternalProviderConfig,
+  McpServerEntry,
+  ResolvedProfile,
+  YoloConfig
+} from "./schema.js";
 import {
   claudeMcpConfigPath,
   copilotHomeDir,
   getCopillmHome,
   piAgentDir,
+  assertSafeProfileName,
   type AgentSessionScope
 } from "../config/home.js";
 import {
@@ -51,6 +57,17 @@ export interface ClaudeRenderInput extends RenderInput {
   env?: Record<string, string>;
 }
 
+type ProviderTarget =
+  | ExternalProviderConfig["pi"]
+  | ExternalProviderConfig["codex"]
+  | ExternalProviderConfig["copilot"];
+
+interface EffectiveProviderTarget {
+  baseUrl: string;
+  model: string;
+  apiKeyEnv?: string;
+}
+
 export interface RenderResult {
   writes: FileWrite[];
   /** Extra env vars to set when spawning the agent. */
@@ -61,6 +78,50 @@ export interface RenderResult {
   notes: string[];
 }
 
+function resolveProviderTarget(
+  provider: ExternalProviderConfig,
+  target: ProviderTarget
+): EffectiveProviderTarget {
+  return {
+    baseUrl: target.base_url ?? provider.base_url,
+    model: target.model ?? provider.model,
+    apiKeyEnv: target.api_key_env ?? provider.api_key_env
+  };
+}
+
+function assertProviderCapability(
+  provider: ExternalProviderConfig,
+  capability: "chat_completions" | "responses",
+  agent: string
+): void {
+  const supported =
+    capability === "responses" ? provider.supports_responses : provider.supports_chat_completions;
+  if (!supported) {
+    const endpoint = capability === "responses" ? "OpenAI Responses" : "OpenAI Chat Completions";
+    throw new AgentConfigError(
+      `External provider "${provider.id}" cannot be used with ${agent}: ` +
+        `supports_${capability} is false, but ${endpoint} is required.`
+    );
+  }
+}
+
+function requireProviderApiKey(
+  provider: ExternalProviderConfig,
+  target: EffectiveProviderTarget,
+  agent: string
+): string | null {
+  if (!target.apiKeyEnv) {
+    return null;
+  }
+  const value = process.env[target.apiKeyEnv];
+  if (value === undefined || value.length === 0) {
+    throw new AgentConfigError(
+      `External provider "${provider.id}" for ${agent} requires environment variable "${target.apiKeyEnv}".`
+    );
+  }
+  return value;
+}
+
 // ─── Codex ────────────────────────────────────────────────────────────────
 
 export function renderCodex(input: CodexRenderInput): RenderResult {
@@ -69,9 +130,11 @@ export function renderCodex(input: CodexRenderInput): RenderResult {
 
   const codexConfigPath = path.join(input.codexHomeDir, "config.toml");
   const existing = fs.existsSync(codexConfigPath) ? fs.readFileSync(codexConfigPath, "utf8") : "";
-  let next = existing;
+  let next = input.resolved.provider
+    ? renderExternalCodexConfig(existing, input.resolved.provider)
+    : existing;
 
-  if (input.codexBaseConfigSourcePath) {
+  if (!input.resolved.provider && input.codexBaseConfigSourcePath) {
     if (fs.existsSync(input.codexBaseConfigSourcePath)) {
       const source = fs.readFileSync(input.codexBaseConfigSourcePath, "utf8");
       next = mergeCodexBaseConfig(next, source, codexConfigPath, input.codexBaseConfigSourcePath);
@@ -81,6 +144,9 @@ export function renderCodex(input: CodexRenderInput): RenderResult {
           `run \`copillm start\` or \`copillm codex\` once first.`
       );
     }
+  }
+  if (input.resolved.provider) {
+    notes.push(`using external provider "${input.resolved.provider.id}" for Codex`);
   }
 
   const mcpToml = renderCodexMcpToml(input.resolved.mcpServers);
@@ -117,6 +183,48 @@ export function renderCodex(input: CodexRenderInput): RenderResult {
   }
 
   return { writes, envOverlay: {}, cliArgs: [], notes };
+}
+
+function renderExternalCodexConfig(
+  existingRaw: string,
+  provider: ExternalProviderConfig
+): string {
+  assertProviderCapability(provider, "responses", "Codex");
+  const target = resolveProviderTarget(provider, provider.codex);
+  requireProviderApiKey(provider, target, "Codex");
+
+  const doc = parseCodexToml(existingRaw, "Codex config.toml");
+  const providers = asRecord(doc.model_providers) ?? {};
+  const providerDoc: Record<string, unknown> = {
+    name: provider.name ?? provider.id,
+    base_url: target.baseUrl,
+    wire_api: "responses",
+    requires_openai_auth: false
+  };
+  if (target.apiKeyEnv) {
+    providerDoc.env_key = target.apiKeyEnv;
+  }
+  if (provider.codex.query_params) {
+    providerDoc.query_params = provider.codex.query_params;
+  }
+  if (provider.codex.request_max_retries !== undefined) {
+    providerDoc.request_max_retries = provider.codex.request_max_retries;
+  }
+  if (provider.codex.stream_max_retries !== undefined) {
+    providerDoc.stream_max_retries = provider.codex.stream_max_retries;
+  }
+  if (provider.codex.stream_idle_timeout_ms !== undefined) {
+    providerDoc.stream_idle_timeout_ms = provider.codex.stream_idle_timeout_ms;
+  }
+
+  providers[provider.id] = providerDoc;
+  doc.model = target.model;
+  doc.model_provider = provider.id;
+  if (provider.codex.reasoning_effort !== undefined) {
+    doc.model_reasoning_effort = provider.codex.reasoning_effort;
+  }
+  doc.model_providers = providers;
+  return `${stringifyToml(doc).trimEnd()}\n`;
 }
 
 function mergeCodexBaseConfig(
@@ -388,6 +496,31 @@ export function renderPi(input: RenderInput): RenderResult {
   const piAgent = piAgentDir(input.sessionScope, input.profileName);
   const extensionDir = path.join(piAgent, "extensions", PI_EXTENSION_DIRNAME);
 
+  if (input.resolved.provider) {
+    const modelsPath = path.join(piAgent, "models.json");
+    const existing = fs.existsSync(modelsPath) ? fs.readFileSync(modelsPath, "utf8") : "";
+    const content = renderExternalPiModels(input.resolved.provider);
+    if (existing !== content) {
+      writes.push({
+        path: modelsPath,
+        content,
+        mode: 0o600,
+        description: "pi models.json (external provider)"
+      });
+    }
+    const mirrorPath = externalPiMirrorPath(input.sessionScope, input.profileName);
+    const mirrorExisting = fs.existsSync(mirrorPath) ? fs.readFileSync(mirrorPath, "utf8") : "";
+    if (mirrorPath !== modelsPath && mirrorExisting !== content) {
+      writes.push({
+        path: mirrorPath,
+        content,
+        mode: 0o600,
+        description: "pi models.json mirror (external provider)"
+      });
+    }
+    notes.push(`using external provider "${input.resolved.provider.id}" for pi`);
+  }
+
   // 1. servers.json — the resolved server list the extension reads at startup.
   const serversJson = renderPiServersJson(input.resolved.mcpServers);
   writes.push({
@@ -421,6 +554,104 @@ export function renderPi(input: RenderInput): RenderResult {
   }
 
   return { writes, envOverlay: {}, cliArgs: [], notes };
+}
+
+function externalPiMirrorPath(
+  sessionScope: AgentSessionScope | undefined,
+  profileName: string | undefined
+): string {
+  if (sessionScope === "isolated") {
+    assertSafeProfileName(profileName);
+    return path.join(getCopillmHome(), "profiles", profileName, "pi", "models.json");
+  }
+  return path.join(getCopillmHome(), "pi", "models.json");
+}
+
+function renderExternalPiModels(provider: ExternalProviderConfig): string {
+  const target = resolveProviderTarget(provider, provider.pi);
+  const requiredCapability =
+    provider.pi.api === "openai-responses" ? "responses" : "chat_completions";
+  assertProviderCapability(provider, requiredCapability, "pi");
+  requireProviderApiKey(provider, target, "pi");
+
+  const model: Record<string, unknown> = {
+    id: target.model
+  };
+  if (provider.name) {
+    model.name = provider.name;
+  }
+  if (provider.context_window !== undefined) {
+    model.contextWindow = provider.context_window;
+  }
+  if (provider.max_output_tokens !== undefined) {
+    model.maxTokens = provider.max_output_tokens;
+  }
+  if (provider.reasoning) {
+    model.reasoning = true;
+  }
+  if (provider.input) {
+    model.input = provider.input;
+  }
+
+  const piProvider: Record<string, unknown> = {
+    baseUrl: target.baseUrl,
+    api: provider.pi.api,
+    // pi requires a non-empty apiKey field for custom providers. When the
+    // endpoint is keyless this is an inert placeholder that local servers
+    // ignore; no real secret is persisted in models.json.
+    apiKey:
+      target.apiKeyEnv
+        ? `$${target.apiKeyEnv}`
+        : "copillm-local",
+    models: [model]
+  };
+  if (provider.pi.auth_header) {
+    piProvider.authHeader = true;
+  }
+  const compat = renderPiCompat(provider.pi.compat);
+  if (Object.keys(compat).length > 0) {
+    piProvider.compat = compat;
+  }
+
+  return `${JSON.stringify({ providers: { [provider.id]: piProvider } }, null, 2)}\n`;
+}
+
+function renderPiCompat(
+  compat: ExternalProviderConfig["pi"]["compat"]
+): Record<string, unknown> {
+  if (!compat) {
+    return {};
+  }
+  const out: Record<string, unknown> = {};
+  if (compat.max_tokens_field !== undefined) {
+    out.maxTokensField = compat.max_tokens_field;
+  }
+  if (compat.thinking_format !== undefined) {
+    out.thinkingFormat = compat.thinking_format;
+  }
+  if (compat.supports_developer_role !== undefined) {
+    out.supportsDeveloperRole = compat.supports_developer_role;
+  }
+  if (compat.supports_reasoning_effort !== undefined) {
+    out.supportsReasoningEffort = compat.supports_reasoning_effort;
+  }
+  if (compat.supports_usage_in_streaming !== undefined) {
+    out.supportsUsageInStreaming = compat.supports_usage_in_streaming;
+  }
+  if (compat.requires_tool_result_name !== undefined) {
+    out.requiresToolResultName = compat.requires_tool_result_name;
+  }
+  if (compat.requires_reasoning_content_on_assistant_messages !== undefined) {
+    out.requiresReasoningContentOnAssistantMessages =
+      compat.requires_reasoning_content_on_assistant_messages;
+  }
+  if (compat.reasoning_effort_map !== undefined) {
+    out.reasoningEffortMap = compat.reasoning_effort_map;
+  }
+  if (compat.thinking_level_map !== undefined) {
+    out.thinkingLevelMap = compat.thinking_level_map;
+  }
+  return out;
 }
 
 function renderPiServersJson(servers: Record<string, McpServerEntry>): string {
@@ -494,6 +725,30 @@ export function renderCopilot(input: RenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
   const cliArgs: string[] = [];
+  const envOverlay: Record<string, string> = {};
+
+  if (input.resolved.provider) {
+    const provider = input.resolved.provider;
+    const target = resolveProviderTarget(provider, provider.copilot);
+    if (provider.type !== "anthropic") {
+      assertProviderCapability(provider, "chat_completions", "Copilot CLI");
+    }
+    if (!provider.tool_calling || !provider.streaming) {
+      throw new AgentConfigError(
+        `External provider "${provider.id}" cannot be used with Copilot CLI: ` +
+          "tool_calling and streaming must both be true."
+      );
+    }
+    const apiKey = requireProviderApiKey(provider, target, "Copilot CLI");
+    envOverlay.COPILOT_PROVIDER_BASE_URL = target.baseUrl;
+    envOverlay.COPILOT_PROVIDER_TYPE = provider.type;
+    envOverlay.COPILOT_MODEL = target.model;
+    if (apiKey !== null) {
+      envOverlay.COPILOT_PROVIDER_API_KEY = apiKey;
+    }
+    envOverlay.COPILOT_OFFLINE = provider.copilot.offline ? "true" : "false";
+    notes.push(`using external provider "${provider.id}" for Copilot CLI`);
+  }
 
   const mcpConfigPath = path.join(
     copilotHomeDir(input.sessionScope, input.profileName),
@@ -519,7 +774,7 @@ export function renderCopilot(input: RenderInput): RenderResult {
 
   return {
     writes,
-    envOverlay: {},
+    envOverlay,
     cliArgs,
     notes
   };
@@ -560,6 +815,8 @@ export interface ApplyOptions {
   cwd: string;
   profileOverride?: string | null;
   skip?: boolean;
+  /** Optional pre-loaded profile, so launchers can decide routing once. */
+  loaded?: LoadResult | null;
   /** Required when agent === "codex". */
   codexHomeDir?: string;
   codexBaseConfigSourcePath?: string;

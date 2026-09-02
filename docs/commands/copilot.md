@@ -7,7 +7,8 @@ nav_order: 4
 
 # `copillm copilot`
 
-Launch GitHub Copilot CLI using copillm's stored GitHub OAuth token, so you do not have to run a second device-flow login for the Copilot CLI.
+Launch GitHub Copilot CLI using either copillm's stored GitHub OAuth token or
+an external provider configured in the active profile.
 
 ```bash
 copillm copilot [args...]
@@ -20,14 +21,29 @@ copillm copilot --help
 copillm copilot suggest -t shell "list large files"
 ```
 
-## What it does
+## Copillm-backed launch
+
+When the active profile has no external provider:
 
 1. Reads the stored GitHub credential. If none is present, exits non-zero with `copillm: no stored GitHub credential — run `copillm auth login` first.`
 2. Resolves the Copilot CLI binary in the same order as the other agent launchers — pinned `--copillm-use`/`COPILLM_COPILOT_VERSION`, then a cached install at `~/.copillm/bin/copilot/<version>/`, then a fresh `npm install` of `@github/copilot`. Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to also consider a system `copilot` on `PATH` (checked before the cache when no version is pinned; off by default).
 3. Spawns the Copilot CLI with `COPILOT_GITHUB_TOKEN` injected into the child environment only. Copilot CLI honours this variable ahead of its own stored credentials, which short-circuits its device-flow login.
 4. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
-> **Note:** Unlike `copillm claude` and `copillm codex`, this launcher does **not** start the local proxy daemon. copillm acts purely as a credential broker for Copilot CLI, so BYOK, model pinning, and HTTP-API-side translation do not apply to this command.
+> **Note:** Unlike `copillm claude` and `copillm codex`, this launcher does **not** start the local proxy daemon. In this mode copillm acts purely as a credential broker for Copilot CLI.
+
+## External provider launch
+
+When the active profile contains `[profiles.<name>.provider]`, copillm skips
+GitHub credential lookup and launches Copilot CLI with the provider's base URL,
+type, model, and credential. The endpoint must support streaming and tool
+calls. An Anthropic provider uses its native message protocol; OpenAI/Azure
+providers use their OpenAI-compatible interface.
+
+The credential value is read from the environment at launch and passed only to
+the child process. It is never stored in `agent.toml` or the generated MCP
+configuration. Use `copillm env copilot` for a shell block that references the
+credential variable without printing its value.
 
 ## Flags
 

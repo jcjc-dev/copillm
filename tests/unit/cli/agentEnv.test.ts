@@ -6,6 +6,7 @@ import {
   buildCopilotEnvOverlay,
   buildPiEnvBundle
 } from "../../../src/cli/agentEnv.js";
+import { renderEnvBlock } from "../../../src/cli/envBlock.js";
 
 describe("buildClaudeEnvBundle", () => {
   it("includes base url, auth token placeholder, and gateway flag by default", () => {
@@ -161,5 +162,25 @@ describe("buildCopilotEnvOverlay", () => {
       if (savedCopilot === undefined) delete process.env.COPILOT_HOME;
       else process.env.COPILOT_HOME = savedCopilot;
     }
+  });
+});
+
+describe("renderEnvBlock", () => {
+  it("renders a Copilot credential as a shell-time environment reference", () => {
+    const block = renderEnvBlock({
+      agent: "copilot",
+      env: {
+        COPILOT_PROVIDER_API_KEY: "",
+        COPILOT_MODEL: "local-model"
+      },
+      envReferences: {
+        COPILOT_PROVIDER_API_KEY: "LOCAL_LLM_API_KEY"
+      },
+      shell: "sh"
+    });
+
+    expect(block).toContain('export COPILOT_PROVIDER_API_KEY="${LOCAL_LLM_API_KEY}"');
+    expect(block).toContain('export COPILOT_MODEL="local-model"');
+    expect(block).not.toContain("provider-secret");
   });
 });
