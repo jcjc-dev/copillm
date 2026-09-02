@@ -41,6 +41,42 @@ body = ""
 # codex = false        # still ask for codex
 # pi = false           # pi has no skip-permissions flag; emits a warning if true
 
+# Uncomment to use one external provider from this profile with Codex, pi, or
+# Copilot CLI. The API key is referenced by environment-variable name only and
+# is never stored in agent.toml or the generated agent config files.
+# [profiles.default.provider]
+# id = "local-llm"
+# name = "Local LLM"
+# type = "openai"                 # openai | azure | anthropic
+# base_url = "http://127.0.0.1:8000/v1"
+# model = "your-model-id"
+# api_key_env = "LOCAL_LLM_API_KEY" # omit for a keyless local endpoint
+# context_window = 262144
+# max_output_tokens = 32768
+# input = ["text"]                  # pi model input modes
+# reasoning = true
+# tool_calling = true
+# streaming = true
+# supports_chat_completions = true
+# supports_responses = true        # required by Codex; set false if unavailable
+#
+# [profiles.default.provider.pi]
+# api = "openai-completions"       # or "openai-responses"
+# auth_header = false
+#
+# [profiles.default.provider.pi.compat]
+# supports_developer_role = false
+# supports_reasoning_effort = false
+# max_tokens_field = "max_tokens"
+# thinking_format = "qwen"
+#
+# [profiles.default.provider.codex]
+# reasoning_effort = "medium"
+# query_params = { }
+#
+# [profiles.default.provider.copilot]
+# offline = true                    # prevents GitHub network/auth traffic
+
 [profiles.default]
 `;
 

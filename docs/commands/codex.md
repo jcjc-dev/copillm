@@ -43,6 +43,8 @@ copillm --debug codex                # equivalent (global debug flag still works
 
 ## What it does
 
+When the active profile has no external provider:
+
 1. Starts the copillm daemon in the background if it is not already running.
 2. Resolves the Codex CLI binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_CODEX_VERSION` environment variable
@@ -56,6 +58,14 @@ copillm --debug codex                # equivalent (global debug flag still works
    ```
 4. Generates `~/.copillm/codex/config.toml` and points Codex at it (via `CODEX_HOME`), or generates the selected profile's isolated Codex home when `session_scope = "isolated"`. Codex sends requests to `http://127.0.0.1:4141/codex/v1`.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
+
+When the active profile contains `[profiles.<name>.provider]`, copillm
+instead writes Codex's provider configuration to the copillm-owned Codex home,
+does not start the daemon, and does not require a GitHub credential. The
+external endpoint must support the OpenAI Responses API; set
+`supports_responses = true` in the provider block. The selected model and
+credential environment-variable reference are passed through to Codex without
+storing the credential value.
 
 For details on Codex-specific configuration, see [Using with Codex CLI](../../codex/).
 
