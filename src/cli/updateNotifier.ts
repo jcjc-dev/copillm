@@ -1,12 +1,16 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { getCopillmHome } from "../config/home.js";
 import type { PackageInfo } from "../config/packageInfo.js";
+import { defaultNpmExecutable, resolveNpmUserConfigPath, withNpmUserConfig } from "./resolveAgent.js";
+import { spawnAgent } from "./windowsSpawn.js";
 
-const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
+const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org/";
 const UPDATE_CHECK_TIMEOUT_MS = 3_000;
+const NPM_PROCESS_STARTUP_GRACE_MS = 1_000;
 
 interface UpdateCache {
   version: 1;
@@ -25,17 +29,37 @@ interface UpdateNotifierOptions {
   argv?: readonly string[];
   cacheFilePath?: string;
   env?: NodeJS.ProcessEnv;
-  fetchImpl?: typeof fetch;
+  npmExecutable?: string;
+  npmRunner?: NpmCommandRunner;
   moduleUrl?: string;
   now?: () => number;
   stderr?: Output;
 }
 
 interface FetchLatestOptions {
-  fetchImpl?: typeof fetch;
+  env?: NodeJS.ProcessEnv;
+  npmExecutable?: string;
+  npmRunner?: NpmCommandRunner;
   registryUrl?: string;
   timeoutMs?: number;
 }
+
+export interface NpmCommandOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+}
+
+export interface NpmCommandResult {
+  exitCode: null | number;
+  stdout: string;
+}
+
+export type NpmCommandRunner = (
+  executable: string,
+  args: string[],
+  options: NpmCommandOptions
+) => Promise<NpmCommandResult>;
 
 export async function maybeNotifyAboutUpdate(options: UpdateNotifierOptions): Promise<void> {
   const argv = options.argv ?? process.argv;
@@ -52,7 +76,9 @@ export async function maybeNotifyAboutUpdate(options: UpdateNotifierOptions): Pr
   const cache = readUpdateCache(cacheFile, packageInfo.name);
   const checkedAt = now();
   const latestVersion = await fetchLatestNpmVersion(packageInfo.name, {
-    fetchImpl: options.fetchImpl,
+    env,
+    npmExecutable: options.npmExecutable,
+    npmRunner: options.npmRunner,
     registryUrl: env.COPILLM_UPDATE_REGISTRY_URL,
     timeoutMs: UPDATE_CHECK_TIMEOUT_MS
   });
@@ -78,29 +104,202 @@ export async function maybeNotifyAboutUpdate(options: UpdateNotifierOptions): Pr
 }
 
 export async function fetchLatestNpmVersion(packageName: string, options: FetchLatestOptions = {}): Promise<null | string> {
-  const registryUrl = options.registryUrl && options.registryUrl.trim().length > 0
-    ? options.registryUrl.trim()
-    : DEFAULT_REGISTRY_URL;
-  const fetchImpl = options.fetchImpl ?? fetch;
+  const env = options.env ?? process.env;
   const timeoutMs = options.timeoutMs ?? UPDATE_CHECK_TIMEOUT_MS;
-  const signal = AbortSignal.timeout(timeoutMs);
+  const npmExecutable = options.npmExecutable ?? defaultNpmExecutable(env);
+  const npmRunner = options.npmRunner ?? runNpmCommand;
+  const userConfigPath = resolveNpmUserConfigPath(env);
+  const registryUrl = await primaryRegistryUrl({
+    env,
+    npmExecutable,
+    npmRunner,
+    registryUrl: options.registryUrl,
+    timeoutMs,
+    userConfigPath
+  });
+  const registries = [registryUrl ?? DEFAULT_REGISTRY_URL];
+  if (!sameRegistry(registries[0], DEFAULT_REGISTRY_URL)) {
+    registries.push(DEFAULT_REGISTRY_URL);
+  }
 
-  try {
-    const response = await fetchImpl(distTagsUrl(packageName, registryUrl), {
-      headers: { accept: "application/json" },
-      signal
+  for (const registry of registries) {
+    const latestVersion = await npmViewLatest({
+      env,
+      npmExecutable,
+      npmRunner,
+      packageName,
+      registry,
+      timeoutMs,
+      userConfigPath
     });
-    if (!response.ok) {
-      return null;
+    if (latestVersion) {
+      return latestVersion;
     }
-    return latestFromDistTags(await response.json());
+  }
+
+  return null;
+}
+
+async function primaryRegistryUrl(options: {
+  env: NodeJS.ProcessEnv;
+  npmExecutable: string;
+  npmRunner: NpmCommandRunner;
+  registryUrl?: string;
+  timeoutMs: number;
+  userConfigPath: null | string;
+}): Promise<null | string> {
+  const explicitRegistry = normalizeRegistryUrl(options.registryUrl) ??
+    normalizeRegistryUrl(options.env.COPILLM_UPDATE_REGISTRY_URL);
+  if (explicitRegistry) {
+    return explicitRegistry;
+  }
+
+  const environmentRegistry = normalizeRegistryUrl(options.env.npm_config_registry) ??
+    normalizeRegistryUrl(options.env.NPM_CONFIG_REGISTRY);
+  if (environmentRegistry) {
+    return environmentRegistry;
+  }
+
+  const configArgs = withNpmUserConfig(
+    ["config", "get", "registry", "--location=user"],
+    options.userConfigPath
+  );
+  const result = await runNpm(options.npmRunner, options.npmExecutable, configArgs, {
+    cwd: os.homedir(),
+    env: options.env,
+    timeoutMs: options.timeoutMs
+  });
+  return result?.exitCode === 0 ? normalizeRegistryUrl(result.stdout) : null;
+}
+
+async function npmViewLatest(options: {
+  env: NodeJS.ProcessEnv;
+  npmExecutable: string;
+  npmRunner: NpmCommandRunner;
+  packageName: string;
+  registry: string;
+  timeoutMs: number;
+  userConfigPath: null | string;
+}): Promise<null | string> {
+  const args = withNpmUserConfig(
+    [
+      "view",
+      options.packageName,
+      "dist-tags.latest",
+      "--json",
+      `--fetch-timeout=${options.timeoutMs}`,
+      "--fetch-retries=0"
+    ],
+    options.userConfigPath
+  );
+  const env = withNpmRegistry(options.env, options.registry);
+  const result = await runNpm(options.npmRunner, options.npmExecutable, args, {
+    cwd: os.homedir(),
+    env,
+    timeoutMs: options.timeoutMs + NPM_PROCESS_STARTUP_GRACE_MS
+  });
+  if (result?.exitCode !== 0) {
+    return null;
+  }
+  return latestFromNpmView(result.stdout);
+}
+
+async function runNpm(
+  npmRunner: NpmCommandRunner,
+  npmExecutable: string,
+  args: string[],
+  options: NpmCommandOptions
+): Promise<null | NpmCommandResult> {
+  try {
+    return await npmRunner(npmExecutable, args, options);
   } catch {
     return null;
   }
 }
 
-export function distTagsUrl(packageName: string, registryUrl = DEFAULT_REGISTRY_URL): string {
-  return `${registryUrl.replace(/\/+$/, "")}/-/package/${encodeURIComponent(packageName)}/dist-tags`;
+function runNpmCommand(
+  executable: string,
+  args: string[],
+  options: NpmCommandOptions
+): Promise<NpmCommandResult> {
+  return new Promise((resolve) => {
+    let stdout = "";
+    let settled = false;
+    let timedOut = false;
+    let child: ReturnType<typeof spawnAgent>;
+    let timer: NodeJS.Timeout | undefined;
+
+    const finish = (result: NpmCommandResult): void => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(result);
+    };
+
+    try {
+      child = spawnAgent(executable, args, {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true
+      });
+    } catch {
+      resolve({ exitCode: null, stdout: "" });
+      return;
+    }
+
+    timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, options.timeoutMs);
+
+    child.stdout?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+    child.once("error", () => finish({ exitCode: null, stdout }));
+    child.once("close", (code) => finish({ exitCode: timedOut ? null : code, stdout }));
+  });
+}
+
+function withNpmRegistry(env: NodeJS.ProcessEnv, registryUrl: string): NodeJS.ProcessEnv {
+  const result = { ...env };
+  for (const key of Object.keys(result)) {
+    if (key.toLowerCase() === "npm_config_registry") {
+      delete result[key];
+    }
+  }
+  result.npm_config_registry = registryUrl;
+  return result;
+}
+
+function normalizeRegistryUrl(value: null | string | undefined): null | string {
+  if (!value || value.trim().length === 0) {
+    return null;
+  }
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function sameRegistry(left: string, right: string): boolean {
+  try {
+    const leftUrl = new URL(left);
+    const rightUrl = new URL(right);
+    const normalizePath = (value: string): string => value.replace(/\/+$/, "");
+    return leftUrl.origin === rightUrl.origin &&
+      normalizePath(leftUrl.pathname) === normalizePath(rightUrl.pathname) &&
+      leftUrl.search === rightUrl.search;
+  } catch {
+    return left.trim().replace(/\/+$/, "").toLowerCase() ===
+      right.trim().replace(/\/+$/, "").toLowerCase();
+  }
 }
 
 export function isNewerVersion(candidate: string, current: string): boolean {
@@ -213,12 +412,18 @@ function parseUpdateCache(value: unknown, packageName: string): null | UpdateCac
   };
 }
 
-function latestFromDistTags(value: unknown): null | string {
-  if (!value || typeof value !== "object") {
+function latestFromNpmView(value: string): null | string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value.trim()) as unknown;
+  } catch {
     return null;
   }
-  const latest = (value as { latest?: unknown }).latest;
-  return typeof latest === "string" && latest.trim().length > 0 ? latest.trim() : null;
+  if (typeof parsed !== "string") {
+    return null;
+  }
+  const latest = parsed.trim();
+  return parseSemver(latest) ? latest : null;
 }
 
 function notifyIfNewer(stderr: Output, packageInfo: PackageInfo, latestVersion: null | string): void {

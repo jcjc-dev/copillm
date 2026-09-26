@@ -1,24 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import { buildVersionHint, computeVersionStatus } from "../../../../src/cli/daemon/versionStatus.js";
+import type { NpmCommandRunner } from "../../../../src/cli/updateNotifier.js";
 
 const PKG = { name: "copillm", version: "0.4.3" };
+const PUBLIC_REGISTRY = "https://registry.npmjs.org/";
 
-function stubFetch(latestVersion: string | null, fail = false): typeof fetch {
-  return (async (input: RequestInfo | URL, init?: RequestInit) => {
-    void input;
-    void init;
-    if (fail) {
-      throw new Error("network down");
+function stubNpmRunner(latestVersion: string | null, fail = false): NpmCommandRunner {
+  return async (_executable, args) => {
+    if (args[0] === "config") {
+      return { exitCode: 0, stdout: PUBLIC_REGISTRY };
     }
-    if (latestVersion === null) {
-      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    if (fail || latestVersion === null) {
+      return { exitCode: 1, stdout: "" };
     }
-    return new Response(JSON.stringify({ latest: latestVersion }), {
-      status: 200,
-      headers: { "content-type": "application/json" }
-    });
-  }) as typeof fetch;
+    return { exitCode: 0, stdout: JSON.stringify(latestVersion) };
+  };
 }
 
 describe("computeVersionStatus", () => {
@@ -28,7 +25,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.3",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.3")
+      npmRunner: stubNpmRunner("0.4.3")
     });
     expect(result).toMatchObject({
       daemon_version: "0.4.3",
@@ -45,7 +42,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.2",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.3")
+      npmRunner: stubNpmRunner("0.4.3")
     });
     expect(result.update_available).toBe(true);
     expect(result.hint).toBe("restart to apply cli v0.4.3");
@@ -57,7 +54,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.3",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.4")
+      npmRunner: stubNpmRunner("0.4.4")
     });
     expect(result.update_available).toBe(true);
     expect(result.hint).toBe("newer version available: v0.4.4 (npm install -g copillm)");
@@ -69,7 +66,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.2",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.4")
+      npmRunner: stubNpmRunner("0.4.4")
     });
     expect(result.update_available).toBe(true);
     expect(result.hint).toBe(
@@ -83,7 +80,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: null,
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.3")
+      npmRunner: stubNpmRunner("0.4.3")
     });
     expect(result.daemon_version).toBeNull();
     expect(result.update_available).toBe(false);
@@ -96,7 +93,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.5.0",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch("0.4.3")
+      npmRunner: stubNpmRunner("0.4.3")
     });
     expect(result.update_available).toBe(false);
     expect(result.hint).toBeNull();
@@ -110,10 +107,10 @@ describe("computeVersionStatus", () => {
       daemonRunning: true,
       noRegistryCheck: true,
       env: {},
-      fetchImpl: (async () => {
+      npmRunner: async () => {
         called = true;
-        return new Response("", { status: 200 });
-      }) as typeof fetch
+        return { exitCode: 0, stdout: JSON.stringify("0.4.3") };
+      }
     });
     expect(called).toBe(false);
     expect(result.latest_version).toBeNull();
@@ -127,10 +124,10 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.3",
       daemonRunning: true,
       env: { NO_UPDATE_NOTIFIER: "1" },
-      fetchImpl: (async () => {
+      npmRunner: async () => {
         called = true;
-        return new Response("", { status: 200 });
-      }) as typeof fetch
+        return { exitCode: 0, stdout: JSON.stringify("0.4.3") };
+      }
     });
     expect(called).toBe(false);
     expect(result.latest_version).toBeNull();
@@ -144,10 +141,10 @@ describe("computeVersionStatus", () => {
         daemonVersion: "0.4.3",
         daemonRunning: true,
         env: { COPILLM_UPDATE_CHECK: value },
-        fetchImpl: (async () => {
+        npmRunner: async () => {
           called = true;
-          return new Response("", { status: 200 });
-        }) as typeof fetch
+          return { exitCode: 0, stdout: JSON.stringify("0.4.3") };
+        }
       });
       expect(called, `value=${value}`).toBe(false);
       expect(result.latest_version, `value=${value}`).toBeNull();
@@ -160,7 +157,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: "0.4.2",
       daemonRunning: true,
       env: {},
-      fetchImpl: stubFetch(null, /* fail */ true)
+      npmRunner: stubNpmRunner(null, /* fail */ true)
     });
     expect(result.latest_version).toBeNull();
     // The daemon-vs-cli comparison still surfaces.
@@ -173,7 +170,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: null,
       daemonRunning: false,
       env: {},
-      fetchImpl: stubFetch("0.4.3")
+      npmRunner: stubNpmRunner("0.4.3")
     });
     expect(result.update_available).toBe(false);
     expect(result.hint).toBeNull();
@@ -185,7 +182,7 @@ describe("computeVersionStatus", () => {
       daemonVersion: null,
       daemonRunning: false,
       env: {},
-      fetchImpl: stubFetch("0.4.4")
+      npmRunner: stubNpmRunner("0.4.4")
     });
     expect(result.update_available).toBe(true);
     expect(result.hint).toBe("newer version available: v0.4.4 (npm install -g copillm)");
