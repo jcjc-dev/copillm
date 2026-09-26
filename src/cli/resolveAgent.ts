@@ -308,6 +308,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       installDir,
       "--no-audit",
       "--no-fund",
+      "--progress",
       "--omit=dev",
       "--include=optional",
       "--ignore-scripts",

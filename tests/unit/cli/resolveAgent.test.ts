@@ -656,6 +656,7 @@ process.exit(0);
       // Must contain each safety flag exactly once.
       expect(installCall.filter((a) => a === "--no-audit")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--no-fund")).toHaveLength(1);
+      expect(installCall.filter((a) => a === "--progress")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--omit=dev")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--include=optional")).toHaveLength(1);
       expect(installCall.filter((a) => a === "--ignore-scripts")).toHaveLength(1);

@@ -27,6 +27,10 @@ copillm copilot suggest -t shell "list large files"
 3. Spawns the Copilot CLI with `COPILOT_GITHUB_TOKEN` injected into the child environment only. Copilot CLI honours this variable ahead of its own stored credentials, which short-circuits its device-flow login.
 4. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
+When copillm needs to download a version that is not cached, the first launch can take a few
+minutes on Windows. Download progress appears in an interactive terminal. Later launches reuse
+the cached install when it still matches the latest available version.
+
 > **Note:** Unlike `copillm claude` and `copillm codex`, this launcher does **not** start the local proxy daemon. copillm acts purely as a credential broker for Copilot CLI, so BYOK, model pinning, and HTTP-API-side translation do not apply to this command.
 
 ## Flags
