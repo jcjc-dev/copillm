@@ -45,7 +45,10 @@ export async function selfUpdateToLatest(
 
   const fetchLatest =
     deps.fetchLatest ??
-    ((name: string) => fetchLatestNpmVersion(name, { registryUrl: env.COPILLM_UPDATE_REGISTRY_URL }));
+    ((name: string) => fetchLatestNpmVersion(name, {
+      env,
+      registryUrl: env.COPILLM_UPDATE_REGISTRY_URL
+    }));
 
   let latest: string | null = null;
   try {

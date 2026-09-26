@@ -713,8 +713,8 @@ function isWindowsCacheInUseError(error: unknown): boolean {
   return code === "EPERM" || code === "EACCES" || code === "EBUSY" || code === "ENOTEMPTY";
 }
 
-function defaultNpmExecutable(): string {
-  const override = process.env.COPILLM_NPM_EXECUTABLE;
+export function defaultNpmExecutable(env: NodeJS.ProcessEnv = process.env): string {
+  const override = env.COPILLM_NPM_EXECUTABLE;
   if (override && override.trim().length > 0) {
     return override;
   }
@@ -723,7 +723,7 @@ function defaultNpmExecutable(): string {
     // up-front so `spawnSyncSafe` routes the call through cmd.exe with safe
     // quoting (CreateProcess can't exec a .cmd batch directly). Walking PATH
     // here keeps callers from having to know the difference.
-    const found = findOnPath("npm");
+    const found = findOnPath("npm", env);
     if (found) return found;
   }
   return "npm";
@@ -875,11 +875,11 @@ function isRosetta(): boolean {
   return result.status === 0 && result.stdout.trim() === "1";
 }
 
-function findOnPath(name: string): null | string {
-  const PATH = process.env.PATH ?? "";
+function findOnPath(name: string, env: NodeJS.ProcessEnv = process.env): null | string {
+  const PATH = env.PATH ?? "";
   const sep = process.platform === "win32" ? ";" : ":";
   const exts = process.platform === "win32"
-    ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.toLowerCase())
+    ? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.toLowerCase())
     : [""];
   for (const dir of PATH.split(sep)) {
     if (!dir) continue;
@@ -946,7 +946,7 @@ export function resolveNpmUserConfigPath(
   }
 }
 
-function withNpmUserConfig(args: string[], userConfigPath: null | string): string[] {
+export function withNpmUserConfig(args: string[], userConfigPath: null | string): string[] {
   if (!userConfigPath) return args;
   return [args[0], "--userconfig", userConfigPath, ...args.slice(1)];
 }
