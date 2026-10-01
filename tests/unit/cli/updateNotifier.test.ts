@@ -44,6 +44,7 @@ describe("update notifier", () => {
       stderr: { isTTY: true, write: (chunk) => writes.push(chunk) },
       fetchImpl
     });
+    await waitForCachedLatest(cacheFilePath, "0.2.5");
 
     expect(writes.join("")).toContain("copillm 0.2.5 is available (current 0.2.4).");
     expect(writes.join("")).toContain("npm install -g copillm");
@@ -59,18 +60,64 @@ describe("update notifier", () => {
     for (const latest of ["0.2.4", "0.2.3", "not-a-version"]) {
       const writes: string[] = [];
       const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({ latest }), { status: 200 });
+      const cacheFilePath = tempCacheFile(tempDirs);
 
       await maybeNotifyAboutUpdate({
         packageInfo,
-        cacheFilePath: tempCacheFile(tempDirs),
+        cacheFilePath: cacheFilePath,
         env: {},
         moduleUrl: npmInstalledModuleUrl(),
         stderr: { isTTY: true, write: (chunk) => writes.push(chunk) },
         fetchImpl
       });
+      await waitForCachedLatest(cacheFilePath, latest);
 
       expect(writes).toEqual([]);
     }
+  });
+
+  it("uses a fresh cache without making a registry request", async () => {
+    const cacheFilePath = tempCacheFile(tempDirs);
+    const writes: string[] = [];
+    let fetchCount = 0;
+    writeUpdateCacheFixture(cacheFilePath, "0.2.5", Date.now());
+
+    await maybeNotifyAboutUpdate({
+      packageInfo,
+      cacheFilePath,
+      env: {},
+      moduleUrl: npmInstalledModuleUrl(),
+      stderr: { isTTY: true, write: (chunk) => writes.push(chunk) },
+      fetchImpl: async () => {
+        fetchCount += 1;
+        return new Response(JSON.stringify({ latest: "0.2.6" }), { status: 200 });
+      }
+    });
+
+    expect(fetchCount).toBe(0);
+    expect(writes.join("")).toContain("copillm 0.2.5 is available (current 0.2.4).");
+  });
+
+  it("does not wait for a stale-cache refresh before returning", async () => {
+    const cacheFilePath = tempCacheFile(tempDirs);
+    const writes: string[] = [];
+    let fetchStarted = false;
+    writeUpdateCacheFixture(cacheFilePath, "0.2.5", Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+    await maybeNotifyAboutUpdate({
+      packageInfo,
+      cacheFilePath,
+      env: {},
+      moduleUrl: npmInstalledModuleUrl(),
+      stderr: { isTTY: true, write: (chunk) => writes.push(chunk) },
+      fetchImpl: async () => {
+        fetchStarted = true;
+        return new Promise<Response>(() => undefined);
+      }
+    });
+
+    expect(fetchStarted).toBe(true);
+    expect(writes.join("")).toContain("copillm 0.2.5 is available (current 0.2.4).");
   });
 
   it("does not check from a source checkout unless explicitly enabled", async () => {
@@ -166,4 +213,36 @@ function npmInstalledModuleUrl(): string {
 
 function sourceCheckoutModuleUrl(): string {
   return pathToFileURL(path.join(os.tmpdir(), "copillm", "dist", "cli", "updateNotifier.js")).href;
+}
+
+function writeUpdateCacheFixture(filePath: string, latestVersion: null | string, checkedAt: number): void {
+  fs.writeFileSync(filePath, JSON.stringify({
+    version: 1,
+    packageName: packageInfo.name,
+    latestVersion,
+    checkedAt
+  }));
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 2_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for update-check cache write");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+async function waitForCachedLatest(filePath: string, expected: string): Promise<void> {
+  await waitFor(() => {
+    try {
+      const cache = JSON.parse(fs.readFileSync(filePath, "utf8")) as {
+        latestVersion?: unknown;
+      };
+      return cache.latestVersion === expected;
+    } catch {
+      return false;
+    }
+  });
 }

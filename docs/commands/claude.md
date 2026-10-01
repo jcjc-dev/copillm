@@ -46,10 +46,12 @@ copillm --debug claude               # equivalent (global debug flag still works
 1. Starts the copillm daemon in the background if it is not already running.
 2. Resolves the Claude Code binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_CLAUDE_VERSION` environment variable
-   2. A cached install at `~/.copillm/bin/claude/<version>/`
-   3. A fresh install of the latest `@anthropic-ai/claude-code` via `npm install` into `~/.copillm/bin/claude/<version>/`
+   2. A cached install at `~/.copillm/bin/claude/<version>/`, using the most recently checked version when available
+   3. Otherwise, a fresh install of the latest `@anthropic-ai/claude-code` into `~/.copillm/bin/claude/<version>/`
 
    > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `claude` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+
+   Version checks are cached for 24 hours. When a check is due and a cached version is available, copillm launches the newest cached install immediately and refreshes version information in the background. If a newer version is found, it is installed on a later launch. A first launch with no cached install still needs to check for and download a version.
 3. Prints the resolved binary path and version, for example:
    ```text
    → claude (cached, ~/.copillm/bin/claude/2.1.0, v2.1.0)

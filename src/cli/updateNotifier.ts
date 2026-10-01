@@ -7,6 +7,7 @@ import type { PackageInfo } from "../config/packageInfo.js";
 
 const DEFAULT_REGISTRY_URL = "https://registry.npmjs.org";
 const UPDATE_CHECK_TIMEOUT_MS = 3_000;
+const UPDATE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 interface UpdateCache {
   version: 1;
@@ -51,20 +52,14 @@ export async function maybeNotifyAboutUpdate(options: UpdateNotifierOptions): Pr
 
   const cache = readUpdateCache(cacheFile, packageInfo.name);
   const checkedAt = now();
-  const latestVersion = await fetchLatestNpmVersion(packageInfo.name, {
-    fetchImpl: options.fetchImpl,
-    registryUrl: env.COPILLM_UPDATE_REGISTRY_URL,
-    timeoutMs: UPDATE_CHECK_TIMEOUT_MS
-  });
-
-  if (latestVersion) {
-    writeUpdateCache(cacheFile, {
-      version: 1,
-      packageName: packageInfo.name,
-      latestVersion,
-      checkedAt
-    });
-    notifyIfNewer(stderr, packageInfo, latestVersion);
+  if (cache) {
+    notifyIfNewer(stderr, packageInfo, cache.latestVersion);
+  }
+  if (
+    cache &&
+    cache.checkedAt <= checkedAt &&
+    checkedAt - cache.checkedAt < UPDATE_CACHE_TTL_MS
+  ) {
     return;
   }
 
@@ -74,7 +69,26 @@ export async function maybeNotifyAboutUpdate(options: UpdateNotifierOptions): Pr
     latestVersion: cache?.latestVersion ?? null,
     checkedAt
   });
-  notifyIfNewer(stderr, packageInfo, cache?.latestVersion ?? null);
+
+  const refresh = fetchLatestNpmVersion(packageInfo.name, {
+    fetchImpl: options.fetchImpl,
+    registryUrl: env.COPILLM_UPDATE_REGISTRY_URL,
+    timeoutMs: UPDATE_CHECK_TIMEOUT_MS
+  }).then((latestVersion) => {
+    writeUpdateCache(cacheFile, {
+      version: 1,
+      packageName: packageInfo.name,
+      latestVersion: latestVersion ?? cache?.latestVersion ?? null,
+      checkedAt: now()
+    });
+    if (latestVersion && latestVersion !== cache?.latestVersion) {
+      notifyIfNewer(stderr, packageInfo, latestVersion);
+    }
+  });
+  void refresh.catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    stderr.write(`copillm: update check failed: ${message}\n`);
+  });
 }
 
 export async function fetchLatestNpmVersion(packageName: string, options: FetchLatestOptions = {}): Promise<null | string> {

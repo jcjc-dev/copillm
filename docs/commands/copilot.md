@@ -23,13 +23,18 @@ copillm copilot suggest -t shell "list large files"
 ## What it does
 
 1. Reads the stored GitHub credential. If none is present, exits non-zero with `copillm: no stored GitHub credential — run `copillm auth login` first.`
-2. Resolves the Copilot CLI binary in the same order as the other agent launchers — pinned `--copillm-use`/`COPILLM_COPILOT_VERSION`, then a cached install at `~/.copillm/bin/copilot/<version>/`, then a fresh `npm install` of `@github/copilot`. Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to also consider a system `copilot` on `PATH` (checked before the cache when no version is pinned; off by default).
+2. Resolves the Copilot CLI binary in the same order as the other agent launchers — pinned `--copillm-use`/`COPILLM_COPILOT_VERSION`, then a cached install at `~/.copillm/bin/copilot/<version>/`, then a fresh install of `@github/copilot` if the known latest version is not cached. Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to also consider a system `copilot` on `PATH` (checked before the cache when no version is pinned; off by default).
 3. Spawns the Copilot CLI with `COPILOT_GITHUB_TOKEN` injected into the child environment only. Copilot CLI honours this variable ahead of its own stored credentials, which short-circuits its device-flow login.
 4. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 
-When copillm needs to download a version that is not cached, the first launch can take a few
-minutes on Windows. Download progress appears in an interactive terminal. Later launches reuse
-the cached install when it still matches the latest available version.
+Version checks are cached for 24 hours. When a check is due and a cached version is available,
+copillm launches the newest cached install immediately and refreshes version information in the
+background. If a newer version is found, it is installed on a later launch. A first launch with
+no cached install still needs to check for and download a version; this can take a few minutes on
+Windows, with progress shown in an interactive terminal.
+
+On Windows, older version folders may remain in `~/.copillm/bin/copilot/`; copillm keeps them
+because a running Copilot CLI session may still be using one.
 
 > **Note:** Unlike `copillm claude` and `copillm codex`, this launcher does **not** start the local proxy daemon. copillm acts purely as a credential broker for Copilot CLI, so BYOK, model pinning, and HTTP-API-side translation do not apply to this command.
 
