@@ -45,10 +45,12 @@ copillm --debug pi                   # copillm daemon diagnostics
 2. Refreshes pi's copillm model list in copillm's own agent dir (`~/.copillm/pi/agent` in shared mode, or the selected profile's isolated directory, via `PI_CODING_AGENT_DIR`) so pi sees the live Copilot catalogue. copillm never writes your real `~/.pi`.
 3. Resolves the pi binary in this order:
    1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_PI_VERSION` environment variable
-   2. A cached install at `~/.copillm/bin/pi/<version>/`
-   3. A fresh install of the latest `@earendil-works/pi-coding-agent` via `npm install` into `~/.copillm/bin/pi/<version>/`
+   2. A cached install at `~/.copillm/bin/pi/<version>/`, using the most recently checked version when available
+   3. Otherwise, a fresh install of the latest `@earendil-works/pi-coding-agent` into `~/.copillm/bin/pi/<version>/`
 
    > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `pi` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+
+   Version checks are cached for 24 hours. When a check is due and a cached version is available, copillm launches the newest cached install immediately and refreshes version information in the background. If a newer version is found, it is installed on a later launch. A first launch with no cached install still needs to check for and download a version.
 4. Injects the environment variables pi requires to talk to the local daemon.
 5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
 

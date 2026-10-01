@@ -3,13 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync, type SpawnSyncOptionsWithBufferEncoding } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
+import { writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { getCopillmHome } from "../config/home.js";
 import {
   type AgentIntegration,
   type AgentName,
   AGENT_REGISTRY
 } from "../integrations/registry.js";
-import { buildWindowsCmdInvocation } from "./windowsSpawn.js";
+import { buildWindowsCmdInvocation, spawnAgent } from "./windowsSpawn.js";
+
+const AGENT_VERSION_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const AGENT_VERSION_CACHE_FILE = ".latest-version.json";
+const AGENT_VERSION_REFRESH_LOCK_FILE = ".version-check.lock";
+const AGENT_VERSION_QUERY_TIMEOUT_MS = 30_000;
 
 export type { AgentName };
 export type ResolveSource = "path" | "cache" | "installed";
@@ -28,6 +34,7 @@ export interface ResolveOptions {
   cacheRoot?: string;
   npmExecutable?: string;
   offline?: boolean;
+  now?: () => number;
   log?: (line: string) => void;
 }
 
@@ -52,6 +59,13 @@ export function binNameFor(agent: AgentName): string {
 interface ParsedPin {
   packageName: string;
   version: null | string;
+}
+
+interface AgentVersionCache {
+  version: 1;
+  packageName: string;
+  latestVersion: null | string;
+  checkedAt: number;
 }
 
 export type PinSource = "env" | "cli";
@@ -148,6 +162,7 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
   const cacheRoot = opts.cacheRoot ?? path.join(getCopillmHome(), "bin");
   const npmExe = opts.npmExecutable ?? defaultNpmExecutable();
   const log = opts.log ?? ((line: string) => process.stderr.write(`${line}\n`));
+  const now = opts.now ?? Date.now;
 
   const integration = AGENT_REGISTRY[agent];
   const pin = opts.pinnedSpec
@@ -179,15 +194,65 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     }
   }
 
-  // 2. Determine target version. If we can reach npm we ask for `latest`;
-  // otherwise we fall through to whatever's already cached so the user can
-  // keep working when the registry is unreachable (corp proxy, npm outage,
-  // airplane mode, etc.).
   let target = pin.version;
   let viewError: null | Error = null;
+  if (!pin.version) {
+    if (opts.offline) {
+      const last = pickLastCached(agentRoot, integration);
+      if (last) {
+        return {
+          source: "cache",
+          binPath: last.binPath,
+          version: last.version,
+          packageName: pkg,
+          cacheDir: last.dir,
+          prunedCount: 0,
+          displayLine: `\u2192 ${binName} (cached fallback, ${displayPath(last.dir)}, v${last.version})`
+        };
+      }
+    } else {
+      const versionCache = readAgentVersionCache(agentRoot, pkg);
+      const versionCacheFresh = isAgentVersionCacheFresh(versionCache, now());
+      if (versionCacheFresh && versionCache?.latestVersion) {
+        target = versionCache.latestVersion;
+      } else {
+        const last = pickLastCached(agentRoot, integration);
+        if (last) {
+          if (!versionCacheFresh) {
+            refreshAgentVersionCacheInBackground({
+              npmExe,
+              packageName: pkg,
+              npmUserConfigPath,
+              agentRoot,
+              integration,
+              cachedVersion: last.version,
+              now,
+              log
+            });
+          }
+          return {
+            source: "cache",
+            binPath: last.binPath,
+            version: last.version,
+            packageName: pkg,
+            cacheDir: last.dir,
+            prunedCount: 0,
+            displayLine: `\u2192 ${binName} (cached fallback, ${displayPath(last.dir)}, v${last.version})`
+          };
+        }
+      }
+    }
+  }
+
+  // A cached version is launched immediately while stale metadata refreshes
+  // in the background. Only a cold install needs a blocking latest lookup.
   if (!target && !opts.offline) {
     try {
       target = npmViewLatest(npmExe, pkg, npmUserConfigPath);
+      if (integration.nativeBinaryPackagePrefix) {
+        target = normalizeDiscoveredNativeVersion(target);
+      }
+      writeAgentVersionCache(agentRoot, pkg, target, now(), log);
     } catch (err) {
       viewError = err instanceof Error ? err : new Error(String(err));
     }
@@ -196,7 +261,8 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     target = normalizeDiscoveredNativeVersion(target);
   }
 
-  // 3. Cache lookup
+  // Use the exact managed version directory whenever the latest known version
+  // is already installed.
   if (target) {
     const cached = findCachedVersion(agentRoot, target, integration);
     if (cached) {
@@ -211,8 +277,6 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
       };
     }
   } else {
-    // Either --offline or we couldn't reach npm to ask "what's latest?".
-    // Use the newest known-good install on disk.
     const last = pickLastCached(agentRoot, integration);
     if (last) {
       if (viewError) {
@@ -427,6 +491,220 @@ function readVersionMarker(dir: string): null | string {
   } catch {
     return null;
   }
+}
+
+function readAgentVersionCache(agentRoot: string, packageName: string): null | AgentVersionCache {
+  try {
+    const parsed = JSON.parse(
+      fs.readFileSync(path.join(agentRoot, AGENT_VERSION_CACHE_FILE), "utf8")
+    ) as unknown;
+    if (!parsed || typeof parsed !== "object") return null;
+    const candidate = parsed as {
+      version?: unknown;
+      packageName?: unknown;
+      latestVersion?: unknown;
+      checkedAt?: unknown;
+    };
+    if (
+      candidate.version !== 1 ||
+      candidate.packageName !== packageName ||
+      (candidate.latestVersion !== null &&
+        (typeof candidate.latestVersion !== "string" ||
+          !SAFE_VERSION_PATTERN.test(candidate.latestVersion))) ||
+      typeof candidate.checkedAt !== "number" ||
+      !Number.isFinite(candidate.checkedAt)
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      packageName,
+      latestVersion: candidate.latestVersion,
+      checkedAt: candidate.checkedAt
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isAgentVersionCacheFresh(cache: null | AgentVersionCache, now: number): boolean {
+  return cache !== null &&
+    cache.checkedAt <= now &&
+    now - cache.checkedAt < AGENT_VERSION_CACHE_TTL_MS;
+}
+
+function writeAgentVersionCache(
+  agentRoot: string,
+  packageName: string,
+  latestVersion: null | string,
+  checkedAt: number,
+  log: (line: string) => void
+): void {
+  const cache: AgentVersionCache = {
+    version: 1,
+    packageName,
+    latestVersion,
+    checkedAt
+  };
+  try {
+    writeFileSecureAtomic(
+      path.join(agentRoot, AGENT_VERSION_CACHE_FILE),
+      `${JSON.stringify(cache, null, 2)}\n`,
+      0o600
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    log(`\u26a0 could not save the latest-version cache for ${packageName}: ${message}`);
+  }
+}
+
+function refreshAgentVersionCacheInBackground(opts: {
+  npmExe: string;
+  packageName: string;
+  npmUserConfigPath: null | string;
+  agentRoot: string;
+  integration: AgentIntegration;
+  cachedVersion: string;
+  now: () => number;
+  log: (line: string) => void;
+}): void {
+  const lockPath = path.join(opts.agentRoot, AGENT_VERSION_REFRESH_LOCK_FILE);
+  try {
+    fs.mkdirSync(opts.agentRoot, { recursive: true });
+    if (!tryAcquireAgentVersionRefreshLock(lockPath)) return;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    opts.log(`\u26a0 could not start a background version check for ${opts.packageName}: ${message}`);
+    return;
+  }
+
+  writeAgentVersionCache(opts.agentRoot, opts.packageName, null, opts.now(), opts.log);
+
+  let child: ReturnType<typeof spawnAgent>;
+  try {
+    child = spawnAgent(
+      opts.npmExe,
+      withNpmUserConfig(["view", opts.packageName, "version"], opts.npmUserConfigPath),
+      { stdio: ["ignore", "pipe", "pipe"] }
+    );
+  } catch (error) {
+    finishAgentVersionRefresh(opts, lockPath, error instanceof Error ? error : new Error(String(error)));
+    return;
+  }
+
+  let stdout = "";
+  let stderr = "";
+  let timedOut = false;
+  let finished = false;
+  child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+  });
+  child.stderr?.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, AGENT_VERSION_QUERY_TIMEOUT_MS);
+  timeout.unref();
+
+  const finish = (error: null | Error, latestVersion?: string): void => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timeout);
+    if (error) {
+      finishAgentVersionRefresh(opts, lockPath, error, stderr);
+      return;
+    }
+    if (!latestVersion || !SAFE_VERSION_PATTERN.test(latestVersion)) {
+      finishAgentVersionRefresh(
+        opts,
+        lockPath,
+        new Error(`npm view ${opts.packageName} version returned an invalid version`),
+        stderr
+      );
+      return;
+    }
+    const normalized = opts.integration.nativeBinaryPackagePrefix
+      ? normalizeDiscoveredNativeVersion(latestVersion)
+      : latestVersion;
+    writeAgentVersionCache(opts.agentRoot, opts.packageName, normalized, opts.now(), opts.log);
+    releaseFileLock(lockPath);
+  };
+
+  child.once("error", (error) => finish(error));
+  child.once("close", (code, signal) => {
+    if (timedOut) {
+      finish(new Error(`npm view ${opts.packageName} version timed out after ${AGENT_VERSION_QUERY_TIMEOUT_MS}ms`));
+    } else if (code !== 0) {
+      const detail = stderr.trim();
+      finish(new Error(
+        `npm view ${opts.packageName} version failed (exit ${code ?? signal ?? "unknown"})` +
+          (detail ? `: ${detail}` : "")
+      ));
+    } else {
+      finish(null, stdout.trim());
+    }
+  });
+}
+
+function finishAgentVersionRefresh(
+  opts: {
+    packageName: string;
+    agentRoot: string;
+    cachedVersion: string;
+    now: () => number;
+    log: (line: string) => void;
+  },
+  lockPath: string,
+  error: Error,
+  stderr = ""
+): void {
+  writeAgentVersionCache(
+    opts.agentRoot,
+    opts.packageName,
+    null,
+    opts.now(),
+    opts.log
+  );
+  const detail = stderr.trim();
+  opts.log(
+    `\u26a0 could not reach npm registry to check for updates (${detail || error.message}); ` +
+      `using cached ${path.basename(opts.agentRoot)} v${opts.cachedVersion}`
+  );
+  releaseFileLock(lockPath);
+}
+
+function tryAcquireAgentVersionRefreshLock(lockPath: string): boolean {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const fd = fs.openSync(
+        lockPath,
+        fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY,
+        0o600
+      );
+      fs.writeSync(fd, String(process.pid));
+      fs.closeSync(fd);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      try {
+        const holder = Number.parseInt(fs.readFileSync(lockPath, "utf8").trim(), 10);
+        const staleEmptyLock =
+          !Number.isFinite(holder) &&
+          Date.now() - fs.statSync(lockPath).mtimeMs > AGENT_VERSION_QUERY_TIMEOUT_MS;
+        if ((Number.isFinite(holder) && !pidAlive(holder)) || staleEmptyLock) {
+          fs.unlinkSync(lockPath);
+          continue;
+        }
+      } catch (lockError) {
+        if ((lockError as NodeJS.ErrnoException).code === "ENOENT") continue;
+      }
+      return false;
+    }
+  }
+  return false;
 }
 
 function isWindowsCacheInUseError(error: unknown): boolean {

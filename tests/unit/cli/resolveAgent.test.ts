@@ -11,6 +11,51 @@ import {
   resolveNpmUserConfigPath
 } from "../../../src/cli/resolveAgent.js";
 
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error("Timed out waiting for background version check");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+function fakeNpmWaitingForRelease(
+  dir: string,
+  startedPath: string,
+  releasePath: string,
+  callsPath: string,
+  latestVersion: string
+): string {
+  fs.mkdirSync(dir, { recursive: true });
+  const scriptPath = path.join(dir, "fake-npm.cjs");
+  fs.writeFileSync(
+    scriptPath,
+    `const fs = require('node:fs');
+const argv = process.argv.slice(2);
+if (argv[0] === 'view') {
+  fs.appendFileSync(${JSON.stringify(callsPath)}, 'view\\n');
+  fs.writeFileSync(${JSON.stringify(startedPath)}, 'started');
+  const interval = setInterval(() => {
+    if (fs.existsSync(${JSON.stringify(releasePath)})) {
+      clearInterval(interval);
+      process.stdout.write(${JSON.stringify(latestVersion)} + '\\n', () => process.exit(0));
+    }
+  }, 5);
+}
+`
+  );
+  if (process.platform === "win32") {
+    const cmdPath = path.join(dir, "fake-npm.cmd");
+    fs.writeFileSync(cmdPath, `@node "${scriptPath}" %*\r\n`);
+    return cmdPath;
+  }
+  const executablePath = path.join(dir, "fake-npm");
+  fs.writeFileSync(executablePath, `#!/usr/bin/env node\nrequire(${JSON.stringify(scriptPath)});\n`, { mode: 0o755 });
+  return executablePath;
+}
+
 describe("parsePinSpec", () => {
   it("returns default package + null version for empty input", () => {
     expect(parsePinSpec("codex", "")).toEqual({ packageName: "@openai/codex", version: null });
@@ -285,6 +330,37 @@ describe("resolveAgent (cache readiness)", async () => {
     }
   });
 
+  it("launches the latest cached Copilot binary from its managed version directory", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-copilot-cache-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const expectedBin = seedCachedBin(cacheRoot, "copilot", "1.2.3", { withMarker: true });
+      const agentRoot = path.join(cacheRoot, "copilot");
+      fs.writeFileSync(
+        path.join(agentRoot, ".latest-version.json"),
+        JSON.stringify({
+          version: 1,
+          packageName: "@github/copilot",
+          latestVersion: "1.2.3",
+          checkedAt: 10_000
+        })
+      );
+
+      const result = await resolveAgent("copilot", {
+        cacheRoot,
+        npmExecutable: path.join(tmp, "npm-must-not-run"),
+        now: () => 10_001
+      });
+
+      expect(result.source).toBe("cache");
+      expect(result.version).toBe("1.2.3");
+      expect(result.binPath).toBe(expectedBin);
+      expect(result.binPath).toContain(path.join("copilot", "1.2.3", "node_modules", ".bin"));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("misses the cache when version.txt is absent (partial install)", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-partial-"));
     try {
@@ -339,10 +415,8 @@ describe("resolveAgent (cache readiness)", async () => {
   });
 });
 
-// Registry-unreachable fallback: if `npm view <pkg> version` fails (network
-// down, corp proxy, npm outage), copillm must transparently fall back to the
-// newest version it has on disk instead of erroring out — the user can keep
-// working with whatever they last successfully installed.
+// Registry-unreachable fallback: a cached agent must launch without waiting
+// for a version lookup, and lookup failures should remain visible afterward.
 describe("resolveAgent (npm view fallback)", async () => {
   const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
 
@@ -374,7 +448,7 @@ describe("resolveAgent (npm view fallback)", async () => {
     return binPath;
   }
 
-  it("falls back to the latest cached version when npm view fails", async () => {
+  it("launches the latest cached version while npm view fails in the background", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-npm-fail-"));
     try {
       const cacheRoot = path.join(tmp, "cache");
@@ -391,10 +465,9 @@ describe("resolveAgent (npm view fallback)", async () => {
       expect(result.source).toBe("cache");
       expect(result.binPath).toBe(expectedBin);
       expect(result.version).toBe("1.2.3");
-      // The fallback should warn the user that the registry was unreachable so
-      // they know they're not necessarily running the latest version.
-      const warned = logs.some((l) => /npm registry/i.test(l) && /codex/.test(l) && /1\.2\.3/.test(l));
-      expect(warned, `expected a registry-unreachable warning in logs: ${JSON.stringify(logs)}`).toBe(true);
+      await waitFor(() =>
+        logs.some((line) => /npm registry/i.test(line) && /codex/.test(line) && /1\.2\.3/.test(line))
+      );
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -410,6 +483,82 @@ describe("resolveAgent (npm view fallback)", async () => {
         resolveAgent("codex", { cacheRoot, npmExecutable })
       ).rejects.toThrow(/could not reach npm registry/i);
     } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveAgent (non-blocking version refresh)", async () => {
+  const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
+
+  it("launches the cached Copilot path before a stale version lookup completes", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-copilot-refresh-"));
+    const cacheRoot = path.join(tmp, "cache");
+    const agentRoot = path.join(cacheRoot, "copilot");
+    const versionDir = path.join(agentRoot, "1.2.3");
+    const binDir = path.join(versionDir, "node_modules", ".bin");
+    const binPath = path.join(binDir, process.platform === "win32" ? "copilot.cmd" : "copilot");
+    const startedPath = path.join(tmp, "npm-view-started");
+    const releasePath = path.join(tmp, "npm-view-release");
+    const callsPath = path.join(tmp, "npm-view-calls");
+    const versionCachePath = path.join(agentRoot, ".latest-version.json");
+    const now = 2 * 24 * 60 * 60 * 1000;
+    fs.mkdirSync(binDir, { recursive: true });
+    if (process.platform === "win32") {
+      fs.writeFileSync(binPath, "@echo 1.2.3\r\n");
+    } else {
+      fs.writeFileSync(binPath, "#!/bin/sh\necho 1.2.3\n", { mode: 0o755 });
+    }
+    fs.writeFileSync(path.join(versionDir, "version.txt"), "1.2.3\n");
+    fs.writeFileSync(
+      versionCachePath,
+      JSON.stringify({
+        version: 1,
+        packageName: "@github/copilot",
+        latestVersion: "1.2.3",
+        checkedAt: 0
+      })
+    );
+
+    try {
+      const npmExecutable = fakeNpmWaitingForRelease(
+        path.join(tmp, "fakenpm"),
+        startedPath,
+        releasePath,
+        callsPath,
+        "1.2.4"
+      );
+      const result = await resolveAgent("copilot", {
+        cacheRoot,
+        npmExecutable,
+        now: () => now
+      });
+      const secondResult = await resolveAgent("copilot", {
+        cacheRoot,
+        npmExecutable,
+        now: () => now
+      });
+
+      await waitFor(() => fs.existsSync(startedPath));
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(binPath);
+      expect(secondResult.binPath).toBe(binPath);
+      expect(fs.readFileSync(callsPath, "utf8").trim().split(/\r?\n/)).toHaveLength(1);
+      expect(fs.existsSync(releasePath)).toBe(false);
+
+      fs.writeFileSync(releasePath, "continue");
+      await waitFor(() => {
+        try {
+          const cached = JSON.parse(fs.readFileSync(versionCachePath, "utf8")) as {
+            latestVersion?: unknown;
+          };
+          return cached.latestVersion === "1.2.4";
+        } catch {
+          return false;
+        }
+      });
+    } finally {
+      fs.writeFileSync(releasePath, "continue");
       fs.rmSync(tmp, { recursive: true, force: true });
     }
   });
@@ -441,8 +590,14 @@ describe("resolveAgent (install args)", async () => {
    * for `view`/`install`. For `install`, it also stages the cache layout the
    * resolver expects so the smoke-test passes.
    */
-  function recordingNpm(dir: string, argvPath: string, latestVersion = "1.2.3"): string {
+  function recordingNpm(
+    dir: string,
+    argvPath: string,
+    latestVersion = "1.2.3",
+    agent = "codex"
+  ): string {
     fs.mkdirSync(dir, { recursive: true });
+    const binName = process.platform === "win32" ? `${agent}.cmd` : agent;
     if (process.platform === "win32") {
       // Minimal Node-backed shim — record argv, then mimic a successful npm
       // install by creating the bin under --prefix.
@@ -458,7 +613,7 @@ if (argv[0] === 'install') {
   const prefix = argv[prefixIdx + 1];
   const binDir = path.join(prefix, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
-  const binPath = path.join(binDir, 'codex.cmd');
+  const binPath = path.join(binDir, ${JSON.stringify(binName)});
   fs.writeFileSync(binPath, '@echo 0.0.1\\r\\n');
 }
 if (argv[0] === 'view') process.stdout.write(${JSON.stringify(latestVersion)} + "\\n");
@@ -482,7 +637,7 @@ if (argv[0] === 'install') {
   const prefix = argv[prefixIdx + 1];
   const binDir = path.join(prefix, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });
-  const binPath = path.join(binDir, 'codex');
+  const binPath = path.join(binDir, ${JSON.stringify(binName)});
   fs.writeFileSync(binPath, '#!/bin/sh\\necho 0.0.1\\n', { mode: 0o755 });
 }
 if (argv[0] === 'view') process.stdout.write(${JSON.stringify(latestVersion)} + "\\n");
@@ -492,6 +647,47 @@ process.exit(0);
     );
     return shPath;
   }
+
+  it("reuses the Copilot package path after the first managed install", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-install-copilot-cache-"));
+    try {
+      const argvPath = path.join(tmp, "npm-argv.jsonl");
+      const npmExe = recordingNpm(path.join(tmp, "fakenpm"), argvPath, "1.2.3", "copilot");
+      const cacheRoot = path.join(tmp, "cache");
+
+      const installed = await resolveAgent("copilot", {
+        cacheRoot,
+        npmExecutable: npmExe,
+        now: () => 1_000
+      });
+      const cached = await resolveAgent("copilot", {
+        cacheRoot,
+        npmExecutable: npmExe,
+        now: () => 1_001
+      });
+
+      const calls = fs.readFileSync(argvPath, "utf8").trim().split(/\r?\n/).map((line) => JSON.parse(line));
+      const expectedBin = path.join(
+        cacheRoot,
+        "copilot",
+        "1.2.3",
+        "node_modules",
+        ".bin",
+        process.platform === "win32" ? "copilot.cmd" : "copilot"
+      );
+      expect(installed.source).toBe("installed");
+      expect(installed.binPath).toBe(expectedBin);
+      expect(cached.source).toBe("cache");
+      expect(cached.version).toBe("1.2.3");
+      expect(cached.binPath).toBe(expectedBin);
+      expect(calls).toHaveLength(2);
+      expect(calls[0][0]).toBe("view");
+      expect(calls[0].slice(-2)).toEqual(["@github/copilot", "version"]);
+      expect(calls[1][0]).toBe("install");
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
 
   function nativeClaudeNpm(dir: string, includeNative = true): string {
     fs.mkdirSync(dir, { recursive: true });
