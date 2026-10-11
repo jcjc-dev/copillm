@@ -164,19 +164,93 @@ headers = { Authorization = "Bearer abc" }
 });
 
 describe("applyAgentConfig — pi", () => {
-  it("writes the extension dir with servers.json and index.ts", () => {
+  it("writes pi's native mcp.json and removes the legacy copillm-mcp extension", () => {
     writeGlobal(`
 [defaults.mcp.servers.echo]
 transport = "stdio"
 command = "echo"
 args = ["hi"]
+env = { FOO = "1" }
+cwd = "/tmp"
 [profiles.default]
 `);
     applyAgentConfig({ agent: "pi", cwd: tmpCwd });
-    const extDir = path.join(tmpHome, "pi", "agent", "extensions", "copillm-mcp");
-    expect(fs.existsSync(path.join(extDir, "index.ts"))).toBe(true);
-    const servers = JSON.parse(fs.readFileSync(path.join(extDir, "servers.json"), "utf8"));
-    expect(servers.servers.echo.command).toBe("echo");
+    const mcpPath = path.join(tmpHome, "pi", "agent", "mcp.json");
+    expect(fs.existsSync(mcpPath)).toBe(true);
+    const doc = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
+    expect(doc.mcpServers.echo).toEqual({
+      command: "echo",
+      args: ["hi"],
+      env: { FOO: "1" },
+      cwd: "/tmp"
+    });
+    // Legacy no-op extension is gone.
+    expect(fs.existsSync(path.join(tmpHome, "pi", "agent", "extensions", "copillm-mcp"))).toBe(false);
+  });
+
+  it("preserves non-copillm servers in mcp.json and drops stale managed ones", () => {
+    // Simulate a prior copillm run plus a user-added server (via `pi mcp add`).
+    fs.mkdirSync(path.join(tmpHome, "pi", "agent"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, "pi", "agent", "mcp.json"),
+      JSON.stringify(
+        { mcpServers: { first: { command: "echo", args: ["one"] }, user: { command: "true" } } },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      path.join(tmpHome, "pi", "agent", "mcp-manifest.json"),
+      JSON.stringify({ servers: ["first"] }, null, 2)
+    );
+
+    // `first` leaves the profile; `second` (HTTP) arrives.
+    writeGlobal(`
+[defaults.mcp.servers.second]
+transport = "http"
+url = "https://example.com/mcp"
+headers = { Authorization = "Bearer x" }
+[profiles.default]
+`);
+    applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    const doc = JSON.parse(fs.readFileSync(path.join(tmpHome, "pi", "agent", "mcp.json"), "utf8"));
+    expect(doc.mcpServers.first).toBeUndefined();
+    expect(doc.mcpServers.second).toEqual({
+      url: "https://example.com/mcp",
+      headers: { Authorization: "Bearer x" }
+    });
+    expect(doc.mcpServers.user).toEqual({ command: "true" }); // preserved
+    const manifest = JSON.parse(fs.readFileSync(path.join(tmpHome, "pi", "agent", "mcp-manifest.json"), "utf8"));
+    expect(manifest.servers).toEqual(["second"]);
+  });
+
+  it("skips SSE servers with a note", () => {
+    writeGlobal(`
+[defaults.mcp.servers.legacy_sse]
+transport = "sse"
+url = "https://example.com/sse"
+[profiles.default]
+`);
+    const result = applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    expect(fs.existsSync(path.join(tmpHome, "pi", "agent", "mcp.json"))).toBe(false);
+    expect(result.notes.some((note) => note.includes("legacy_sse"))).toBe(true);
+  });
+
+  it("removes stale mcp.json when the profile declares no servers", () => {
+    writeGlobal(`
+[defaults.mcp.servers.first]
+transport = "stdio"
+command = "echo"
+[profiles.default]
+`);
+    applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    const mcpPath = path.join(tmpHome, "pi", "agent", "mcp.json");
+    expect(fs.existsSync(mcpPath)).toBe(true);
+
+    writeGlobal(`[profiles.default]\n`);
+    applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    expect(fs.existsSync(mcpPath)).toBe(false);
+    expect(fs.existsSync(path.join(tmpHome, "pi", "agent", "mcp-manifest.json"))).toBe(false);
   });
 });
 
@@ -411,9 +485,7 @@ args = ["personal"]
     expect(claude.cliArgs).toEqual(["--mcp-config", claudePath]);
     expect(fs.existsSync(claudePath)).toBe(true);
     expect(codex.writes.some((write) => write.path.startsWith(codexHome))).toBe(true);
-    expect(fs.existsSync(path.join(profileRoot, "pi", "agent", "extensions", "copillm-mcp", "servers.json"))).toBe(
-      true
-    );
+    expect(fs.existsSync(path.join(profileRoot, "pi", "agent", "mcp.json"))).toBe(true);
     expect(copilot.cliArgs).toEqual(["--additional-mcp-config", `@${copilotPath}`]);
     expect(fs.existsSync(copilotPath)).toBe(true);
 
