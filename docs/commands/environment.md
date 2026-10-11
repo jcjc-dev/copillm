@@ -22,6 +22,7 @@ nav_order: 9
 | `COPILLM_YOLO` | Tri-state default for `--yolo`: `1`/`true`/`yes` enables, `0`/`false`/`no` disables (overrides `agent.toml`), unset defers to config. See [MCP & `agent.toml`](../../mcp/). |
 | `COPILLM_USE_SYSTEM_AGENT` | Set to `1`/`true`/`yes` to let the agent launchers fall back to a matching binary on `PATH`. Off by default, so copillm runs the version it manages. |
 | `COPILLM_UPDATE_CHECK` | Override the startup npm update check: `0`/`false`/`no`/`off` disables it, `1`/`true`/`yes`/`on` forces it on. Also disabled by `--no-update-notifier` or the standard `NO_UPDATE_NOTIFIER` env var. |
+| `COPILLM_UPDATE_REGISTRY_URL` | Override the primary registry used for version checks. By default, copillm uses npm's user-level registry configuration and falls back to npmjs.org if that registry cannot return a version. |
 | `CODEX_HOME` | Set by copillm when it launches Codex, pointing Codex at the generated shared or profile-isolated config. |
 | `CLAUDE_CONFIG_DIR` | Set by copillm when it launches Claude, pointing Claude at the generated shared or profile-isolated config/session home. |
 | `PI_CODING_AGENT_DIR` | Set by copillm when it launches pi, pointing pi at the generated shared or profile-isolated agent home. |

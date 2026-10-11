@@ -1,5 +1,10 @@
 import type { PackageInfo } from "../../config/packageInfo.js";
-import { fetchLatestNpmVersion, isNewerVersion, parseBooleanOverride } from "../updateNotifier.js";
+import {
+  fetchLatestNpmVersion,
+  isNewerVersion,
+  parseBooleanOverride,
+  type NpmCommandRunner
+} from "../updateNotifier.js";
 
 const DEFAULT_REGISTRY_TIMEOUT_MS = 1_500;
 
@@ -36,8 +41,8 @@ export interface ComputeVersionStatusOptions {
   env?: NodeJS.ProcessEnv;
   /** Set true to bypass the npm registry lookup. */
   noRegistryCheck?: boolean;
-  /** Test injection for the network fetch. */
-  fetchImpl?: typeof fetch;
+  /** Test injection for the npm command runner. */
+  npmRunner?: NpmCommandRunner;
   /** Overrides the npm registry URL; respects `COPILLM_UPDATE_REGISTRY_URL` env when unset. */
   registryUrl?: string;
   /** Per-request timeout for the registry lookup. */
@@ -73,7 +78,8 @@ export async function computeVersionStatus(options: ComputeVersionStatusOptions)
   let latestVersion: string | null = null;
   if (!registryCheckDisabled) {
     latestVersion = await fetchLatestNpmVersion(options.cliPackageInfo.name, {
-      fetchImpl: options.fetchImpl,
+      env,
+      npmRunner: options.npmRunner,
       registryUrl: options.registryUrl ?? env.COPILLM_UPDATE_REGISTRY_URL,
       timeoutMs: options.timeoutMs ?? DEFAULT_REGISTRY_TIMEOUT_MS
     });
