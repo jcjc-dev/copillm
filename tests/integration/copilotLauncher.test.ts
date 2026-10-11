@@ -45,6 +45,11 @@ function writeShim(dir: string, dumpPath: string): string {
       `}\n` +
       `fs.writeFileSync(${JSON.stringify(dumpPath)}, JSON.stringify({\n` +
       `  COPILOT_GITHUB_TOKEN: process.env.COPILOT_GITHUB_TOKEN ?? "",\n` +
+      `  COPILOT_PROVIDER_BASE_URL: process.env.COPILOT_PROVIDER_BASE_URL ?? "",\n` +
+      `  COPILOT_PROVIDER_TYPE: process.env.COPILOT_PROVIDER_TYPE ?? "",\n` +
+      `  COPILOT_PROVIDER_API_KEY: process.env.COPILOT_PROVIDER_API_KEY ?? "",\n` +
+      `  COPILOT_MODEL: process.env.COPILOT_MODEL ?? "",\n` +
+      `  COPILOT_OFFLINE: process.env.COPILOT_OFFLINE ?? "",\n` +
       `  COPILOT_HOME: process.env.COPILOT_HOME ?? "",\n` +
       `  args: process.argv.slice(2)\n` +
       `}) + "\\n");\n` +
@@ -197,12 +202,85 @@ headers = { Authorization = "Bearer abc" }
       tools: ["*"],
       args: ["default"]
     });
+
     expect(config.mcpServers.work_server).toEqual({
       type: "http",
       url: "https://example.com/mcp",
       tools: ["*"],
       headers: { Authorization: "Bearer abc" }
     });
+  });
+
+  it("launches an external provider without GitHub authentication", () => {
+    if (process.platform === "win32") return;
+    if (!shimDir || !envDumpPath) {
+      throw new Error("test setup did not complete");
+    }
+
+    const externalHome = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-copilot-byok-"));
+    const providerSecret = "provider-secret-not-in-output";
+    try {
+      fs.writeFileSync(
+        path.join(externalHome, "agent.toml"),
+        `
+active_profile = "local"
+
+[profiles.local.provider]
+id = "local-provider"
+base_url = "http://127.0.0.1:8000/v1"
+model = "local-test-model"
+api_key_env = "TEST_PROVIDER_KEY"
+context_window = 131072
+max_output_tokens = 16384
+
+[profiles.local.provider.copilot]
+offline = true
+`
+      );
+
+      const env: NodeJS.ProcessEnv = {
+        ...process.env,
+        PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+        COPILLM_HOME: externalHome,
+        COPILLM_PROFILE: "local",
+        COPILLM_USE_SYSTEM_AGENT: "1",
+        TEST_PROVIDER_KEY: providerSecret
+      };
+      delete env.COPILOT_GITHUB_TOKEN;
+      delete env.GH_TOKEN;
+      delete env.GITHUB_TOKEN;
+      delete env.COPILOT_PROVIDER_API_KEY;
+      delete env.COPILOT_PROVIDER_BASE_URL;
+      delete env.COPILOT_MODEL;
+
+      const result = spawnSync(
+        process.execPath,
+        [cliPath, "copilot", "-p", "hello"],
+        { env, encoding: "utf8", timeout: 30_000 }
+      );
+
+      expect(result.error, result.error?.message).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain(providerSecret);
+      expect(result.stderr).not.toContain(providerSecret);
+
+      const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as {
+        COPILOT_GITHUB_TOKEN: string;
+        COPILOT_PROVIDER_BASE_URL: string;
+        COPILOT_PROVIDER_TYPE: string;
+        COPILOT_PROVIDER_API_KEY: string;
+        COPILOT_MODEL: string;
+        COPILOT_OFFLINE: string;
+      };
+      expect(dump.COPILOT_GITHUB_TOKEN).toBe("");
+      expect(dump.COPILOT_PROVIDER_BASE_URL).toBe("http://127.0.0.1:8000/v1");
+      expect(dump.COPILOT_PROVIDER_TYPE).toBe("openai");
+      expect(dump.COPILOT_PROVIDER_API_KEY).toBe(providerSecret);
+      expect(dump.COPILOT_MODEL).toBe("local-test-model");
+      expect(dump.COPILOT_OFFLINE).toBe("true");
+    } finally {
+      fs.rmSync(externalHome, { recursive: true, force: true });
+    }
   });
 
   it("fails with a clear message when no credential is stored", () => {

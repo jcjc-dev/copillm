@@ -1,5 +1,7 @@
 import type { Command } from "commander";
 import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.js";
+import { loadAgentConfig, type LoadResult } from "../../../agentconfig/load.js";
+import { codexHomeDir } from "../../../config/home.js";
 import { buildCodexEnvBundle } from "../../agentEnv.js";
 import { processCopillmArgs } from "../../copillmFlags.js";
 import { ensureDaemonRunningForLauncher } from "../../daemon/ensureRunning.js";
@@ -23,14 +25,20 @@ export function register(program: Command): void {
         const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
         let sessionScope: SessionScopeResolution;
         let launchAccount;
+        let loaded: LoadResult | null;
         try {
+          loaded = opts.copillmNoConfig
+            ? null
+            : loadAgentConfig({ cwd: process.cwd(), profileOverride });
           sessionScope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
-          launchAccount = await resolveLaunchAccount({
-            flag: opts.copillmAccount,
-            envValue: process.env.COPILLM_ACCOUNT,
-            cwd: process.cwd(),
-            profileOverride
-          });
+          launchAccount = loaded?.resolved.provider
+            ? null
+            : await resolveLaunchAccount({
+                flag: opts.copillmAccount,
+                envValue: process.env.COPILLM_ACCOUNT,
+                cwd: process.cwd(),
+                profileOverride
+              });
         } catch (error) {
           process.stderr.write(`copillm: ${error instanceof Error ? error.message : String(error)}\n`);
           process.exit(1);
@@ -40,17 +48,23 @@ export function register(program: Command): void {
           process.stderr.write(`${formatLaunchAccountNotice(launchAccount)}\n`);
         }
         enableRuntimeDebug(debug);
-        const lock = await ensureDaemonRunningForLauncher({ debug });
-        const codex = await refreshCodexHome(lock.port, null, undefined, {
-          pathPrefix: launchAccount?.pathPrefix,
-          account: launchAccount?.account,
-          sessionScope: sessionScope.scope,
-          profileName: sessionScope.profileName
-        });
-        if (!codex) {
-          throw new Error("Failed to prepare Codex home (see warning above).");
+        let codexHome: string;
+        if (loaded?.resolved.provider) {
+          codexHome = codexHomeDir(sessionScope.scope, sessionScope.profileName);
+        } else {
+          const lock = await ensureDaemonRunningForLauncher({ debug });
+          const codex = await refreshCodexHome(lock.port, null, undefined, {
+            pathPrefix: launchAccount?.pathPrefix,
+            account: launchAccount?.account,
+            sessionScope: sessionScope.scope,
+            profileName: sessionScope.profileName
+          });
+          if (!codex) {
+            throw new Error("Failed to prepare Codex home (see warning above).");
+          }
+          codexHome = codex.outDir;
         }
-        const bundle = buildCodexEnvBundle(codex.outDir);
+        const bundle = buildCodexEnvBundle(codexHome);
         const pinnedSpec = opts.copillmUse ?? process.env.COPILLM_CODEX_VERSION ?? undefined;
         const pinnedSource: "cli" | "env" | undefined = opts.copillmUse
           ? "cli"
@@ -60,8 +74,9 @@ export function register(program: Command): void {
         const applyResult = applyAgentConfig({
           agent: "codex",
           cwd: process.cwd(),
-          codexHomeDir: codex.outDir,
           profileOverride,
+          loaded,
+          codexHomeDir: codexHome,
           skip: Boolean(opts.copillmNoConfig)
         });
         for (const line of formatApplyNotes(applyResult, "codex")) {

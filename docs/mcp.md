@@ -6,7 +6,7 @@ nav_order: 6
 
 # MCP & `agent.toml`
 
-copillm is a **MCP configuration aggregator**. You declare your MCP servers once in `~/.copillm/agent.toml`, and copillm fans them out to each coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`).
+copillm is a **MCP and model configuration aggregator**. You declare your MCP servers and, optionally, one external model provider once in `~/.copillm/agent.toml`, and copillm fans them out to each supported coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`, or `copillm copilot`).
 
 copillm itself does **not** speak the MCP wire protocol — it just renders the right files for each downstream agent.
 
@@ -180,6 +180,109 @@ Now `copillm codex --profile work` (or any launch with `work` active) routes at 
 
 You can also set `account` under `[defaults]` to pin a baseline account for every profile; a profile's own `account` overrides the default.
 
+## External model providers
+
+A profile can select one OpenAI-compatible, Azure-compatible, or
+Anthropic-compatible endpoint for Codex CLI, pi, and GitHub Copilot CLI.
+This is useful for a local server, a hosted provider, or a gateway that
+exposes one of the supported APIs.
+
+The provider is optional. When it is absent, copillm keeps its normal
+Copilot-backed behaviour. When it is present, `copillm codex`, `copillm pi`,
+and `copillm copilot` use the external endpoint and do not need a stored
+GitHub credential or a running copillm daemon for that launch. Claude Code
+does not use this provider block yet.
+
+### One provider syntax
+
+```toml
+[profiles.local.provider]
+id = "local-llm"
+name = "Local LLM"
+type = "openai"                    # openai | azure | anthropic
+base_url = "http://127.0.0.1:8000/v1"
+model = "your-model-id"
+api_key_env = "LOCAL_LLM_API_KEY"  # omit for a keyless local endpoint
+
+context_window = 262144
+max_output_tokens = 32768
+input = ["text"]                   # pi model input modes: text | image
+reasoning = true
+tool_calling = true
+streaming = true
+supports_chat_completions = true
+supports_responses = true          # required by Codex; set false if unavailable
+
+[profiles.local.provider.pi]
+api = "openai-completions"         # or "openai-responses"
+auth_header = false
+
+[profiles.local.provider.pi.compat]
+supports_developer_role = false
+supports_reasoning_effort = false
+requires_tool_result_name = true
+max_tokens_field = "max_tokens"
+thinking_format = "qwen"
+
+[profiles.local.provider.codex]
+reasoning_effort = "medium"
+# query_params = { }
+
+[profiles.local.provider.copilot]
+offline = true
+```
+
+Common fields describe the endpoint once:
+
+| Field | Purpose |
+| ----- | ------- |
+| `id` | Safe provider name used in generated configuration. |
+| `name` | Optional display name. |
+| `type` | Provider family: `openai`, `azure`, or `anthropic`. |
+| `base_url` | Endpoint base URL. |
+| `model` | Model identifier sent by default. |
+| `api_key_env` | Name of an environment variable containing an API key. |
+| `context_window` | Context limit used by pi. |
+| `max_output_tokens` | Output limit used by pi. |
+| `input` | Optional pi input modes: `text` and/or `image`. |
+| `reasoning` | Whether the model supports reasoning/thinking. |
+| `tool_calling` | Whether the endpoint supports tool calls. |
+| `streaming` | Whether the endpoint supports streaming responses. |
+| `supports_chat_completions` | Whether the endpoint accepts OpenAI Chat Completions requests. |
+| `supports_responses` | Whether the endpoint accepts OpenAI Responses requests. |
+
+The `pi`, `codex`, and `copilot` sections can override `base_url`, `model`,
+and the credential environment-variable name for that agent without
+duplicating the provider. Values in `pi.compat` are forwarded to pi's
+compatibility settings for providers that need role, token-field, reasoning,
+or thinking-format adjustments.
+
+### How each agent uses the provider
+
+- **Codex CLI** uses the OpenAI Responses API. Set
+  `supports_responses = true`; the generated Codex configuration uses the
+  selected model, endpoint, and referenced credential variable.
+- **pi** uses the API selected by `provider.pi.api`. It receives one model
+  entry with the context/output limits, reasoning flag, input modes, and
+  compatibility options. pi reads the credential by environment-variable
+  reference; the secret is not written to `models.json`.
+- **GitHub Copilot CLI** uses the selected provider type and its supported
+  OpenAI-compatible or Anthropic-compatible BYOK interface. The endpoint must
+  support streaming and tool calls. The credential is read in memory and
+  passed only to the child process. Use
+  `copillm env copilot` to print a shell block that references the credential
+  variable without printing its value.
+
+Use `copillm config sync --agent <kind>` to render the selected profile
+without launching an agent. Use `copillm env codex`, `copillm env pi`, or
+`copillm env copilot` to print launch environment/configuration details;
+external-provider variants work even when the copillm daemon is stopped.
+
+Provider blocks are replaced as a complete object by a later project/profile
+layer. This prevents an endpoint from one provider being combined with
+credentials or model metadata from another. API keys must remain outside
+`agent.toml`; only their environment-variable names belong in the file.
+
 ## Environment variable expansion
 
 `${VAR}` and `${VAR:-default}` are expanded in `command`, `args`, `url`, `env` values, and `headers` values at load time:
@@ -214,7 +317,9 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 - `copillm codex` injects a `[mcp_servers]` TOML block into `~/.copillm/codex/config.toml` (or the isolated profile directory) for the wrapped launch.
 - `copillm config sync --agent codex` merges copillm's provider block into `~/.codex/config.toml` and injects the `[mcp_servers]` block there.
 - The block is delimited with hash-comment markers so subsequent runs replace just the managed section.
-- Requires `copillm start` (or any prior launch) to have generated the base `config.toml` first.
+- A Copillm-backed profile requires `copillm start` (or any prior launch) to
+  have generated the base `config.toml` first. An external-provider profile
+  writes its provider configuration directly and does not require the daemon.
 
 ### pi
 
@@ -293,6 +398,10 @@ copillm: --yolo ignored for pi (pi has no blanket-approve flag; ...; source: pro
 | `copillm config profile list` | List profiles (active marked with `*`) |
 | `copillm config profile use <name>` | Set `active_profile` in global file |
 | `copillm config sync --agent <kind> [--profile <name>]` | Sync to native/default agent paths without launching. `<kind>` ∈ `codex \| claude \| pi \| copilot` |
+
+`copillm env <agent> [--profile <name>]` prints launch
+environment/configuration details. External-provider `codex`, `pi`, and
+`copilot` output does not require a running daemon.
 
 ## Troubleshooting
 

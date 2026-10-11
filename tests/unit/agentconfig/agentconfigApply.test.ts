@@ -180,6 +180,125 @@ args = ["hi"]
   });
 });
 
+describe("applyAgentConfig — external provider", () => {
+  const providerKey = "TEST_EXTERNAL_PROVIDER_KEY";
+  const providerSecret = "provider-secret-must-not-be-written";
+
+  afterEach(() => {
+    delete process.env[providerKey];
+  });
+
+  function writeProviderProfile(extra = ""): void {
+    writeGlobal(`
+[profiles.default.provider]
+id = "local-llm"
+name = "Local LLM"
+base_url = "http://127.0.0.1:8000/v1"
+model = "local-test-model"
+api_key_env = "${providerKey}"
+context_window = 262144
+max_output_tokens = 32768
+input = ["text"]
+reasoning = true
+supports_responses = true
+
+[profiles.default.provider.pi]
+api = "openai-completions"
+auth_header = true
+
+[profiles.default.provider.pi.compat]
+supports_developer_role = false
+supports_reasoning_effort = false
+requires_tool_result_name = true
+thinking_format = "qwen"
+
+[profiles.default.provider.codex]
+reasoning_effort = "medium"
+
+[profiles.default.provider.copilot]
+offline = true
+${extra}
+`);
+  }
+
+  it("renders Codex and pi native configuration without persisting the key", () => {
+    process.env[providerKey] = providerSecret;
+    writeProviderProfile();
+
+    const codexHome = path.join(tmpHome, "codex");
+    fs.mkdirSync(codexHome, { recursive: true });
+    const codex = applyAgentConfig({
+      agent: "codex",
+      cwd: tmpCwd,
+      codexHomeDir: codexHome
+    });
+    const codexConfig = fs.readFileSync(path.join(codexHome, "config.toml"), "utf8");
+    expect(codexConfig).toContain('model = "local-test-model"');
+    expect(codexConfig).toContain('model_provider = "local-llm"');
+    expect(codexConfig).toContain('env_key = "TEST_EXTERNAL_PROVIDER_KEY"');
+    expect(codexConfig).not.toContain(providerSecret);
+
+    const pi = applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    const piConfig = JSON.parse(
+      fs.readFileSync(path.join(tmpHome, "pi", "agent", "models.json"), "utf8")
+    ) as {
+      providers: Record<string, {
+        apiKey: string;
+        api: string;
+        baseUrl: string;
+        models: Array<Record<string, unknown>>;
+        authHeader?: boolean;
+        compat?: Record<string, unknown>;
+      }>;
+    };
+    const provider = piConfig.providers["local-llm"];
+    expect(provider.apiKey).toBe("$TEST_EXTERNAL_PROVIDER_KEY");
+    expect(provider.authHeader).toBe(true);
+    expect(provider.api).toBe("openai-completions");
+    expect(provider.models[0]).toMatchObject({
+      id: "local-test-model",
+      name: "Local LLM",
+      contextWindow: 262144,
+      maxTokens: 32768,
+      reasoning: true,
+      input: ["text"]
+    });
+    expect(provider.compat).toMatchObject({
+      supportsDeveloperRole: false,
+      supportsReasoningEffort: false,
+      requiresToolResultName: true,
+      thinkingFormat: "qwen"
+    });
+    expect(JSON.stringify(piConfig)).not.toContain(providerSecret);
+    expect(pi.notes).toContain('using external provider "local-llm" for pi');
+  });
+
+  it("renders Copilot BYOK environment without writing the key", () => {
+    process.env[providerKey] = providerSecret;
+    writeProviderProfile();
+
+    const result = applyAgentConfig({ agent: "copilot", cwd: tmpCwd });
+    expect(result.envOverlay).toMatchObject({
+      COPILOT_PROVIDER_BASE_URL: "http://127.0.0.1:8000/v1",
+      COPILOT_PROVIDER_TYPE: "openai",
+      COPILOT_MODEL: "local-test-model",
+      COPILOT_PROVIDER_API_KEY: providerSecret,
+      COPILOT_OFFLINE: "true"
+    });
+    expect(result.writes.every((write) => !write.content.includes(providerSecret))).toBe(true);
+  });
+
+  it("fails before writing when a referenced provider key is missing", () => {
+    delete process.env[providerKey];
+    writeProviderProfile();
+
+    expect(() => applyAgentConfig({ agent: "copilot", cwd: tmpCwd })).toThrow(
+      /TEST_EXTERNAL_PROVIDER_KEY/
+    );
+    expect(fs.existsSync(path.join(tmpHome, "copilot", "mcp-config.json"))).toBe(false);
+  });
+});
+
 describe("applyAgentConfig — copilot", () => {
   it("writes Copilot MCP config and emits --additional-mcp-config CLI args", () => {
     writeGlobal(`
