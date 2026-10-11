@@ -324,8 +324,10 @@ If `${VAR}` is unset and no `:-default` is provided, load fails with a clear err
 ### pi
 
 - copillm points pi at a copillm-owned agent dir via `PI_CODING_AGENT_DIR` (`~/.copillm/pi/agent` in shared mode), so it never writes your real `~/.pi`. To launch `pi` directly (without copillm), export `PI_CODING_AGENT_DIR` to that path first.
-- Writes a `copillm-mcp` extension into the selected agent directory (`extensions/copillm-mcp/`; `servers.json` + `index.ts`).
-- v1 lists servers via a `/copillm-mcp` slash command; full stdio/http transport wiring is deferred to a follow-up.
+- Writes the resolved MCP servers into pi's native `<agentDir>/mcp.json` (`mcpServers` shape). Pi's built-in MCP (since 0.99) reads that file directly — **no extension required**. Servers added with `pi mcp add` are preserved; a `mcp-manifest.json` tracks which server names copillm owns so stale ones are dropped cleanly. SSE servers are skipped with a note (pi supports stdio and streamable HTTP only).
+- Fans out profile instructions to `<agentDir>/APPEND_SYSTEM.md` inside a `<!-- copillm:managed -->` block, which pi injects into its system prompt.
+- **Requires pi ≥ 0.99** (pi's built-in MCP). copillm installs the latest `@earendil-works/pi-coding-agent`, so this is automatic; the MCP fan-out only takes effect on pi versions with built-in MCP.
+- On upgrade, removes the legacy no-op `copillm-mcp` extension and `prompts/copillm-profile.md` from earlier copillm versions.
 
 ### Copilot CLI
 

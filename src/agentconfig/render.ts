@@ -487,6 +487,19 @@ function serverToClaudeShape(server: McpServerEntry): Record<string, unknown> {
 
 // ─── pi ───────────────────────────────────────────────────────────────────
 
+/**
+ * pi (`@earendil-works/pi-coding-agent`) has built-in MCP support since 0.99:
+ * it reads user-level servers from `<agentDir>/mcp.json` (the agent dir copillm
+ * sets via PI_CODING_AGENT_DIR) using the standard `mcpServers` shape. The
+ * earlier `copillm-mcp` extension only listed server names without wiring any
+ * transport, so fan-out now writes the native file directly and removes the
+ * legacy extension.
+ *
+ * copillm manages a named subset of servers in that file and preserves any
+ * others (e.g. added with `pi mcp add`). `mcp-manifest.json` records which
+ * names copillm owns so a server that leaves the active profile is dropped
+ * without touching the rest of the file.
+ */
 const PI_EXTENSION_DIRNAME = "copillm-mcp";
 
 export function renderPi(input: RenderInput): RenderResult {
@@ -494,7 +507,6 @@ export function renderPi(input: RenderInput): RenderResult {
   const notes: string[] = [];
 
   const piAgent = piAgentDir(input.sessionScope, input.profileName);
-  const extensionDir = path.join(piAgent, "extensions", PI_EXTENSION_DIRNAME);
 
   if (input.resolved.provider) {
     const modelsPath = path.join(piAgent, "models.json");
@@ -521,36 +533,42 @@ export function renderPi(input: RenderInput): RenderResult {
     notes.push(`using external provider "${input.resolved.provider.id}" for pi`);
   }
 
-  // 1. servers.json — the resolved server list the extension reads at startup.
-  const serversJson = renderPiServersJson(input.resolved.mcpServers);
-  writes.push({
-    path: path.join(extensionDir, "servers.json"),
-    content: serversJson,
-    mode: 0o600,
-    description: "pi MCP extension servers.json"
-  });
+  // 1. Native MCP config at <agentDir>/mcp.json (pi's built-in MCP).
+  writes.push(...renderPiMcpJson(piAgent, input.resolved.mcpServers, notes));
 
-  // 2. index.ts — the extension template (constant — see piExtensionTemplate.ts).
-  writes.push({
-    path: path.join(extensionDir, "index.ts"),
-    content: PI_EXTENSION_INDEX_TS,
-    mode: 0o600,
-    description: "pi MCP extension index.ts"
-  });
+  // 2. Clean up the legacy no-op extension and prompt template from earlier
+  //    copillm versions — pi has had working built-in MCP since 0.99.
+  const legacyExtDir = path.join(piAgent, "extensions", PI_EXTENSION_DIRNAME);
+  if (fs.existsSync(legacyExtDir)) {
+    fs.rmSync(legacyExtDir, { recursive: true, force: true });
+    notes.push(`Removed legacy no-op pi extension (${legacyExtDir}); pi has built-in MCP.`);
+  }
+  const legacyPromptPath = path.join(piAgent, "prompts", "copillm-profile.md");
+  if (fs.existsSync(legacyPromptPath)) {
+    fs.rmSync(legacyPromptPath, { force: true });
+    notes.push(
+      `Removed legacy pi prompt template (${legacyPromptPath}); instructions now fan out to APPEND_SYSTEM.md.`
+    );
+  }
 
-  // 3. instructions prompt registered by the extension on session_start.
+  // 3. Profile instructions — pi injects <agentDir>/APPEND_SYSTEM.md into the
+  //    system prompt; the managed block keeps any manual additions intact.
   if (input.resolved.instructions) {
-    const promptPath = path.join(piAgent, "prompts", "copillm-profile.md");
-    writes.push({
-      path: promptPath,
-      content: `${input.resolved.instructions.body.trim()}\n`,
-      mode: 0o600,
-      description: "pi profile prompt"
-    });
+    const appendPath = path.join(piAgent, "APPEND_SYSTEM.md");
+    const existing = fs.existsSync(appendPath) ? fs.readFileSync(appendPath, "utf8") : "";
+    const next = upsertManagedBlock(existing, input.resolved.instructions.body, HTML_COMMENT);
+    if (next !== existing) {
+      writes.push({
+        path: appendPath,
+        content: next,
+        mode: 0o600,
+        description: "pi APPEND_SYSTEM.md instructions block"
+      });
+    }
   }
 
   if (Object.keys(input.resolved.mcpServers).length === 0 && !input.resolved.instructions) {
-    notes.push("pi: no MCP servers or instructions in active profile; extension still written as a no-op.");
+    notes.push("pi: active profile declares no MCP servers or instructions; nothing for copillm to fan out.");
   }
 
   return { writes, envOverlay: {}, cliArgs: [], notes };
@@ -654,70 +672,138 @@ function renderPiCompat(
   return out;
 }
 
-function renderPiServersJson(servers: Record<string, McpServerEntry>): string {
-  const out: Record<string, unknown> = {};
+/** pi's native MCP config, written to `<agentDir>/mcp.json`. */
+function renderPiMcpJson(
+  piAgent: string,
+  servers: Record<string, McpServerEntry>,
+  notes: string[]
+): FileWrite[] {
+  const writes: FileWrite[] = [];
+  const mcpJsonPath = path.join(piAgent, "mcp.json");
+  const manifestPath = path.join(piAgent, "mcp-manifest.json");
+
+  // Names copillm owned on the previous run.
+  const managed = readPiMcpManifest(manifestPath);
+
+  // Build the new copillm-managed entries. pi rejects SSE — skip it with a note.
+  const nextManaged: Record<string, unknown> = {};
+  const skippedSse: string[] = [];
   for (const [name, server] of Object.entries(servers)) {
-    out[name] = serverToClaudeShape(server); // same wire shape works
+    if (server.transport === "sse") {
+      skippedSse.push(name);
+      continue;
+    }
+    nextManaged[name] = serverToPiShape(server);
   }
-  return `${JSON.stringify({ servers: out }, null, 2)}\n`;
-}
-
-// Template for the pi extension. Kept inline (small) so a single commit ships
-// both the renderer and the runtime side-by-side. The extension is
-// deliberately conservative: it logs what it sees and registers a placeholder
-// tool per server. Wiring real MCP stdio/http transport is left for a follow-up
-// PR — this lands the plumbing without claiming working tool-calls.
-const PI_EXTENSION_INDEX_TS = `// Generated by copillm. Do not edit by hand.
-// Source of truth: ~/.copillm/agent.toml
-//
-// This extension is registered automatically by copillm whenever you run
-// \`copillm pi\`. It loads the resolved MCP server list from the sibling
-// servers.json and exposes each entry to pi. v1 only registers the servers
-// and surfaces them via a slash command; real MCP transport wiring lands in
-// a follow-up.
-
-import fs from "node:fs";
-import path from "node:path";
-
-interface PiApi {
-  registerCommand: (name: string, handler: () => Promise<string> | string) => void;
-  on?: (event: string, handler: (...args: unknown[]) => void) => void;
-}
-
-export default function activate(pi: PiApi): void {
-  const serversPath = path.join(__dirname, "servers.json");
-  let servers: Record<string, unknown> = {};
-  try {
-    const raw = JSON.parse(fs.readFileSync(serversPath, "utf8")) as { servers?: Record<string, unknown> };
-    servers = raw.servers ?? {};
-  } catch {
-    servers = {};
+  if (skippedSse.length > 0) {
+    notes.push(
+      `pi: skipping SSE MCP server(s) — pi supports stdio and streamable HTTP only: ${skippedSse.join(", ")}`
+    );
   }
 
-  pi.registerCommand("copillm-mcp", () => {
-    const names = Object.keys(servers);
-    if (names.length === 0) return "No MCP servers configured via copillm.";
-    return "copillm-managed MCP servers:\\n" + names.map((n) => "  - " + n).join("\\n");
-  });
+  // Merge into the existing file: drop copillm-managed names that left the
+  // profile, add the current ones, and preserve unrelated entries.
+  const doc = readPiMcpJson(mcpJsonPath);
+  for (const name of managed) {
+    if (!(name in nextManaged)) {
+      delete doc.mcpServers[name];
+    }
+  }
+  for (const [name, entry] of Object.entries(nextManaged)) {
+    doc.mcpServers[name] = entry;
+  }
 
-  // Resolve the prompt relative to this extension's own directory. copillm
-  // owns the pi agent dir (via PI_CODING_AGENT_DIR), and the extension lives at
-  // <agentDir>/extensions/<name>/, so the prompt is two levels up under prompts/.
-  const promptPath = path.join(__dirname, "..", "..", "prompts", "copillm-profile.md");
-  if (fs.existsSync(promptPath) && typeof pi.on === "function") {
-    pi.on("session_start", () => {
-      try {
-        const body = fs.readFileSync(promptPath, "utf8");
-        // pi swallows return values from event handlers; logging the body
-        // suffices for the v1 plumbing — instruction injection lands in v2.
-        console.log("[copillm] loaded profile prompt (" + body.length + " bytes)");
-      } catch {
-        /* swallow */
-      }
+  if (Object.keys(doc.mcpServers).length === 0) {
+    if (fs.existsSync(mcpJsonPath)) {
+      fs.rmSync(mcpJsonPath, { force: true });
+      notes.push(`Removed stale ${mcpJsonPath} (no MCP servers in active profile).`);
+    }
+    if (fs.existsSync(manifestPath)) {
+      fs.rmSync(manifestPath, { force: true });
+    }
+    return writes;
+  }
+
+  const content = `${JSON.stringify(doc, null, 2)}\n`;
+  const existing = fs.existsSync(mcpJsonPath) ? fs.readFileSync(mcpJsonPath, "utf8") : null;
+  if (existing !== content) {
+    writes.push({
+      path: mcpJsonPath,
+      content,
+      mode: 0o600,
+      description: "pi mcp.json (copillm-managed)"
     });
   }
+
+  const manifestContent = `${JSON.stringify({ servers: Object.keys(nextManaged) }, null, 2)}\n`;
+  const existingManifest = fs.existsSync(manifestPath) ? fs.readFileSync(manifestPath, "utf8") : null;
+  if (existingManifest !== manifestContent) {
+    writes.push({
+      path: manifestPath,
+      content: manifestContent,
+      mode: 0o600,
+      description: "pi MCP manifest"
+    });
+  }
+  return writes;
 }
-`;
+
+/**
+ * Convert a copillm server to pi's `mcp.json` shape. `type` is optional — pi
+ * infers stdio from `command` and streamable HTTP from `url`.
+ */
+function serverToPiShape(server: McpServerEntry): Record<string, unknown> {
+  if (server.transport === "stdio") {
+    const out: Record<string, unknown> = { command: server.command };
+    if (server.args) out.args = server.args;
+    if (server.env) out.env = server.env;
+    if (server.cwd) out.cwd = server.cwd;
+    return out;
+  }
+  const out: Record<string, unknown> = { url: server.url };
+  if (server.headers) out.headers = server.headers;
+  return out;
+}
+
+interface PiMcpDoc {
+  mcpServers: Record<string, unknown>;
+}
+
+function readPiMcpJson(mcpJsonPath: string): PiMcpDoc {
+  if (!fs.existsSync(mcpJsonPath)) {
+    return { mcpServers: {} };
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(mcpJsonPath, "utf8")) as Partial<PiMcpDoc>;
+    const mcpServers = parsed?.mcpServers;
+    if (mcpServers && typeof mcpServers === "object" && !Array.isArray(mcpServers)) {
+      return { mcpServers: { ...mcpServers } };
+    }
+    return { mcpServers: {} };
+  } catch (error) {
+    throw new AgentConfigError(
+      `Failed to parse ${mcpJsonPath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+function readPiMcpManifest(manifestPath: string): string[] {
+  if (!fs.existsSync(manifestPath)) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(manifestPath, "utf8")) as { servers?: unknown };
+    const servers = parsed?.servers;
+    if (!Array.isArray(servers)) {
+      return [];
+    }
+    return servers.filter((server): server is string => typeof server === "string");
+  } catch {
+    // A corrupt manifest only means we can't drop stale names this run; the
+    // current servers are still merged in and the manifest is rewritten.
+    return [];
+  }
+}
 
 // ─── Copilot CLI ──────────────────────────────────────────────────────────
 
