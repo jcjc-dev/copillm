@@ -22,6 +22,7 @@ export interface CopillmLaunchOpts {
   copillmProfile?: string;
   copillmAccount?: string;
   copillmNoConfig?: boolean;
+  copillmCopilot?: boolean;
   yolo?: boolean;
 }
 
@@ -92,6 +93,13 @@ export const COPILLM_FLAGS: CopillmFlagSpec[] = [
     dest: "copillmNoConfig",
     kind: "swallow",
     description: "Skip agent.toml fan-out for this launch"
+  },
+  {
+    flag: "--copillm-copilot",
+    takesValue: false,
+    dest: "copillmCopilot",
+    kind: "swallow",
+    description: "Feed the Copilot token to pi's native Copilot provider (no daemon)"
   },
   {
     flag: "--yolo",
