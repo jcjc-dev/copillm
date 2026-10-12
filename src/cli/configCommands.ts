@@ -3,12 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import type { Command } from "commander";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { getCopillmHome } from "../config/home.js";
+import { getCopillmHome, piAgentDir } from "../config/home.js";
 import { ensureSecureCopillmDirectory, writeFileSecureAtomic } from "../config/fsSecurity.js";
 import { loadConfig } from "../config/config.js";
 import { AgentConfigError, loadAgentConfig } from "../agentconfig/load.js";
+import { discoverAndWritePiModels } from "../agentconfig/piModels.js";
 import { applyAgentConfig, formatApplyNotes } from "../agentconfig/apply.js";
 import type { AgentKind } from "../agentconfig/render.js";
+import { resolveSessionScope } from "../agentconfig/sessionScope.js";
 import { buildClaudeEnvBundle } from "./agentEnv.js";
 
 const SCAFFOLD_TOML = `# copillm agent config — one source of truth for instructions and MCP servers
@@ -181,13 +183,14 @@ export function registerConfigCommands(program: Command): void {
     .description("Sync resolved config to the agent's native paths without launching")
     .requiredOption("--agent <kind>", "codex | claude | pi | copilot")
     .option("--profile <name>", "Override active profile for this run")
-    .action((opts: { agent: string; profile?: string }) => {
+    .action(async (opts: { agent: string; profile?: string }) => {
       const agent = opts.agent as AgentKind;
       if (!["codex", "claude", "pi", "copilot"].includes(agent)) {
         process.stderr.write(`Unknown agent kind "${opts.agent}".\n`);
         process.exit(1);
       }
       try {
+        const profileOverride = opts.profile ?? null;
         const claudeEnv =
           agent === "claude"
             ? buildClaudeEnvBundle({
@@ -199,7 +202,7 @@ export function registerConfigCommands(program: Command): void {
         const result = applyAgentConfig({
           agent,
           cwd: process.cwd(),
-          profileOverride: opts.profile ?? null,
+          profileOverride,
           codexHomeDir: agent === "codex" ? path.join(os.homedir(), ".codex") : undefined,
           codexBaseConfigSourcePath:
             agent === "codex" ? path.join(getCopillmHome(), "codex", "config.toml") : undefined,
@@ -212,10 +215,32 @@ export function registerConfigCommands(program: Command): void {
         if (result.active === null) {
           process.stdout.write("(no agent.toml — nothing to do)\n");
         }
+        // Discover + render profile-scoped pi model providers into pi's models.json.
+        // Gated behind the non-default COPILLM_PI_NATIVE_COPILOT feature flag.
+        if (agent === "pi" && result.active !== null && isNativeCopilotFlagEnabled()) {
+          const loaded = loadAgentConfig({ cwd: process.cwd(), profileOverride });
+          const piModels = loaded?.resolved.piModels ?? {};
+          if (Object.keys(piModels).length > 0) {
+            const scope = resolveSessionScope({ cwd: process.cwd(), profileOverride });
+            const agentDir = piAgentDir(scope.scope, scope.profileName);
+            const notes = await discoverAndWritePiModels(agentDir, piModels);
+            for (const note of notes) {
+              process.stdout.write(`  • ${note}\n`);
+            }
+          }
+        }
       } catch (error) {
         handleAgentConfigError(error);
       }
     });
+}
+
+function isNativeCopilotFlagEnabled(): boolean {
+  const value = process.env.COPILLM_PI_NATIVE_COPILOT;
+  if (value === undefined) {
+    return false;
+  }
+  return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
 function handleAgentConfigError(error: unknown): never {

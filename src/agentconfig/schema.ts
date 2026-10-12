@@ -186,6 +186,51 @@ const ExternalProviderSchema = z
 
 export type ExternalProviderConfig = z.infer<typeof ExternalProviderSchema>;
 
+/**
+ * One model definition for a profile-scoped pi custom provider (rendered into
+ * pi's `models.json`). Mirrors pi's `models` entry shape for a provider:
+ * `contextWindow`/`maxTokens` use pi's camelCase keys.
+ */
+const PiModelSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1).optional(),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    reasoning: z.boolean().optional(),
+    input: z.array(z.enum(["text", "image"])).optional(),
+    samplingParams: z.record(z.unknown()).optional(),
+    thinkingLevelMap: z.record(z.unknown()).optional()
+  })
+  .strict();
+
+/**
+ * A profile-scoped model provider for pi, e.g. a local vLLM/Ollama/DeepSeek
+ * endpoint. copillm discovers the model list from the endpoint's OpenAI-style
+ * `/models` route and renders the provider into pi's `models.json`, so pi can
+ * connect and use those models alongside the copillm proxy catalog. Secrets
+ * are by reference: `api_key_env` names an environment variable.
+ */
+const PiModelProviderSchema = z
+  .object({
+    name: z.string().min(1).optional(),
+    base_url: z.string().url(),
+    api: z
+      .enum(["openai-completions", "openai-responses", "anthropic-messages"])
+      .default("openai-completions"),
+    api_key: z.string().optional(),
+    api_key_env: EnvVarNameSchema.optional(),
+    /** Path appended to `base_url` for OpenAI-style model discovery. Default `/models`. */
+    discovery_path: z.string().default("/models"),
+    /** Optional static model list (full pi metadata); used when discovery is off or fails. */
+    models: z.array(PiModelSchema).optional(),
+    /** Also query the discovery endpoint and add any discovered model ids. */
+    discover_models: z.boolean().default(true)
+  })
+  .strict();
+
+export type PiModelProviderConfig = z.infer<typeof PiModelProviderSchema>;
+
 const PassthroughRecord = z.record(z.unknown());
 
 /**
@@ -226,6 +271,8 @@ const SectionSchema = z
     instructions: InstructionsSchema.optional(),
     mcp: McpSchema.optional(),
     provider: ExternalProviderSchema.optional(),
+    /** Profile-scoped pi custom model providers (rendered into pi's models.json). */
+    pi_models: z.record(PiModelProviderSchema).optional(),
     yolo: YoloSchema.optional(),
     /**
      * Pin a copillm account for launches that use this profile. The launcher
@@ -258,6 +305,8 @@ export interface ResolvedProfile {
   mcpServers: Record<string, McpServerEntry>;
   /** One external provider for Codex, pi, and Copilot CLI, or null for Copillm. */
   provider: ExternalProviderConfig | null;
+  /** Profile-scoped pi custom model providers keyed by provider id. */
+  piModels: Record<string, PiModelProviderConfig>;
   /** Resolved downstream agent state policy; defaults to the legacy shared paths. */
   sessionScope: SessionScope;
   /**

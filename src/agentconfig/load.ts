@@ -8,6 +8,7 @@ import {
   type AgentToml,
   type ExternalProviderConfig,
   type McpServerEntry,
+  type PiModelProviderConfig,
   type ResolvedProfile,
   type SessionScope,
   type Section,
@@ -160,6 +161,21 @@ function mergeAndResolve(input: {
     }
   }
 
+  // Merge pi_models map: later layers replace earlier same-named providers.
+  // Values are env-expanded under their source scope (project-scope entries
+  // cannot interpolate ${VAR} from the ambient environment).
+  const piModels: Record<string, PiModelProviderConfig> = {};
+  for (const { section, scope } of layers) {
+    const layerProviders = section.pi_models ?? {};
+    for (const [name, value] of Object.entries(layerProviders)) {
+      piModels[name] = {
+        ...value,
+        base_url: expandString(value.base_url, scope, name, "base_url"),
+        api_key: value.api_key ? expandString(value.api_key, scope, name, "api_key") : undefined
+      };
+    }
+  }
+
   // Merge the pinned account: later layers (project over global, profile over
   // defaults) win. Empty string is treated as unset.
   let account: string | null = null;
@@ -193,7 +209,7 @@ function mergeAndResolve(input: {
   const yolo = mergeYolo(sections);
   const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, provider, account, sessionScope, yolo, reserved };
+  return { instructions, mcpServers: servers, provider, piModels, account, sessionScope, yolo, reserved };
 }
 
 interface ScopedSection {
