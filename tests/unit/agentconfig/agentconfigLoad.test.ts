@@ -156,6 +156,39 @@ command = "work-cmd"
     expect(db && db.transport === "stdio" ? db.command : null).toBe("work-cmd");
   });
 
+  it("merges Copilot launch defaults field-by-field across layers", () => {
+    writeGlobal(`
+[defaults.copilot]
+model = "default-test-model"
+reasoning_effort = "medium"
+context_tier = "long_context"
+
+[profiles.work.copilot]
+model = "work-test-model"
+`);
+    writeProject(`
+[profiles.work.copilot]
+reasoning_effort = "high"
+context_tier = "default"
+`);
+
+    expect(loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })?.resolved.copilot).toEqual({
+      model: "work-test-model",
+      reasoning_effort: "high",
+      context_tier: "default"
+    });
+  });
+
+  it("rejects unsupported Copilot reasoning effort and context tiers", () => {
+    writeGlobal(`
+[profiles.work.copilot]
+reasoning_effort = "extreme"
+context_tier = "unlimited"
+`);
+
+    expect(() => loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })).toThrow(/schema/i);
+  });
+
   it("rejects duplicate TOML keys with parser diagnostic", () => {
     writeGlobal(`
 [defaults.mcp.servers.x]
