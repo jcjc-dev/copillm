@@ -8,9 +8,9 @@ import { z } from "zod";
  * active. A profile may override a default by re-declaring an entry with the
  * same key (e.g. `[profiles.work.mcp.servers.<name>]` replaces the same-named
  * `[defaults.mcp.servers.<name>]`). There is no way to *remove* a default from
- * a profile — defaults are intentionally always-on. v1 only wires
- * `instructions` and `mcp` into fan-out — the other
- * sections (`skills`, `agents`, `hooks`, `permissions`) are reserved-but-
+ * a profile — defaults are intentionally always-on. Rendered sections include
+ * `instructions`, `mcp`, `provider`, `pi_models`, `copilot`, and `yolo`. The
+ * sections (`skills`, `agents`, `hooks`, `permissions`) remain reserved-but-
  * permissive so users can start populating them without future TOML breaking.
  * `session_scope` controls whether downstream agent state uses the historical
  * shared paths or a profile-namespaced home. A profile may also declare one
@@ -156,6 +156,16 @@ const CopilotProviderSchema = z
   .strict()
   .default({});
 
+const CopilotLaunchSchema = z
+  .object({
+    model: ProviderModelSchema.optional(),
+    reasoning_effort: z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"]).optional(),
+    context_tier: z.enum(["default", "long_context"]).optional()
+  })
+  .strict();
+
+export type CopilotLaunchConfig = z.infer<typeof CopilotLaunchSchema>;
+
 /**
  * A provider is deliberately credential-by-reference: api_key_env names an
  * environment variable but no secret value can be placed in agent.toml.
@@ -270,6 +280,8 @@ const SectionSchema = z
     session_scope: SessionScopeSchema.optional(),
     instructions: InstructionsSchema.optional(),
     mcp: McpSchema.optional(),
+    /** Native Copilot CLI launch defaults; only consumed by `copillm copilot`. */
+    copilot: CopilotLaunchSchema.optional(),
     provider: ExternalProviderSchema.optional(),
     /** Profile-scoped pi custom model providers (rendered into pi's models.json). */
     pi_models: z.record(PiModelProviderSchema).optional(),
@@ -305,6 +317,8 @@ export interface ResolvedProfile {
   mcpServers: Record<string, McpServerEntry>;
   /** One external provider for Codex, pi, and Copilot CLI, or null for Copillm. */
   provider: ExternalProviderConfig | null;
+  /** Native Copilot CLI defaults for model, reasoning effort, and context tier. */
+  copilot: CopilotLaunchConfig | null;
   /** Profile-scoped pi custom model providers keyed by provider id. */
   piModels: Record<string, PiModelProviderConfig>;
   /** Resolved downstream agent state policy; defaults to the legacy shared paths. */

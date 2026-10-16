@@ -180,6 +180,33 @@ Now `copillm codex --profile work` (or any launch with `work` active) routes at 
 
 You can also set `account` under `[defaults]` to pin a baseline account for every profile; a profile's own `account` overrides the default.
 
+## Copilot CLI launch preferences
+
+Set model, reasoning effort, and context tier for `copillm copilot` in
+`[defaults.copilot]` or `[profiles.<name>.copilot]`. Only configured values are
+passed as Copilot CLI flags; values not set here continue to come from Copilot
+CLI's own settings.
+
+```toml
+[profiles.work.copilot]
+model = "gpt-6-luna"
+reasoning_effort = "xhigh"
+context_tier = "long_context"
+```
+
+`model` is a model identifier supported by your Copilot CLI account.
+`reasoning_effort` accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+or `max`. `context_tier` accepts `default` or `long_context`. Values merge
+field-by-field through the normal defaults/profile/project precedence. A
+Copilot CLI flag provided directly on the `copillm copilot` command overrides
+the corresponding profile value; for example:
+
+```bash
+copillm copilot --profile work --model another-model
+```
+
+These preferences affect only `copillm copilot`, not other agent launchers.
+
 ## External model providers
 
 A profile can select one OpenAI-compatible, Azure-compatible, or

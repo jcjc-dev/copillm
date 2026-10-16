@@ -6,6 +6,7 @@ import { getCopillmHome } from "../config/home.js";
 import {
   AgentTomlSchema,
   type AgentToml,
+  type CopilotLaunchConfig,
   type ExternalProviderConfig,
   type McpServerEntry,
   type PiModelProviderConfig,
@@ -207,9 +208,10 @@ function mergeAndResolve(input: {
   };
 
   const yolo = mergeYolo(sections);
+  const copilot = mergeCopilot(sections);
   const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, provider, piModels, account, sessionScope, yolo, reserved };
+  return { instructions, mcpServers: servers, provider, piModels, copilot, account, sessionScope, yolo, reserved };
 }
 
 interface ScopedSection {
@@ -253,6 +255,18 @@ function mergeYolo(layers: Section[]): YoloConfig | null {
   if (enabled !== undefined) out.enabled = enabled;
   if (Object.keys(agents).length > 0) out.agents = agents;
   return out;
+}
+
+/** Merge Copilot CLI launch defaults field-by-field across config layers. */
+function mergeCopilot(layers: Section[]): CopilotLaunchConfig | null {
+  let saw = false;
+  const copilot: CopilotLaunchConfig = {};
+  for (const layer of layers) {
+    if (!layer.copilot) continue;
+    saw = true;
+    Object.assign(copilot, layer.copilot);
+  }
+  return saw ? copilot : null;
 }
 
 function mergeRecord(layers: Section[], key: keyof Section): Record<string, unknown> {

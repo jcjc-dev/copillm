@@ -8,6 +8,33 @@ import { launchAgent } from "../../launchAgent.js";
 import { buildCopilotEnvOverlay } from "../../agentEnv.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 
+function buildCopilotProfileArgs(
+  config: NonNullable<LoadResult["resolved"]["copilot"]> | null,
+  forwarded: readonly string[]
+): string[] {
+  if (!config) return [];
+
+  const args: string[] = [];
+  if (config.model && !hasForwardedOption(forwarded, "--model")) {
+    args.push("--model", config.model);
+  }
+  if (config.reasoning_effort && !hasForwardedOption(forwarded, "--reasoning-effort")) {
+    args.push("--reasoning-effort", config.reasoning_effort);
+  }
+  if (config.context_tier && !hasForwardedOption(forwarded, "--context")) {
+    args.push("--context", config.context_tier);
+  }
+  return args;
+}
+
+function hasForwardedOption(args: readonly string[], option: string): boolean {
+  for (const arg of args) {
+    if (arg === "--") return false;
+    if (arg === option || arg.startsWith(`${option}=`)) return true;
+  }
+  return false;
+}
+
 export function register(program: Command): void {
   program
     .command("copilot")
@@ -82,7 +109,8 @@ export function register(program: Command): void {
           // never export to the parent shell and never persist.
           env.COPILOT_GITHUB_TOKEN = githubToken;
         }
-        const baseArgs = [...forwarded, ...applyResult.cliArgs];
+        const profileArgs = buildCopilotProfileArgs(loaded?.resolved.copilot ?? null, forwarded);
+        const baseArgs = [...profileArgs, ...forwarded, ...applyResult.cliArgs];
         const args = applyYoloForLaunch({ agent: "copilot", flag: opts.yolo, applyResult, baseArgs });
         const exitCode = await launchAgent({
           agent: "copilot",

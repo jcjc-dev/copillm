@@ -79,6 +79,13 @@ body = ""
 # [profiles.default.provider.copilot]
 # offline = true                    # prevents GitHub network/auth traffic
 
+# Uncomment to pass built-in Copilot CLI model options on launches with this
+# profile. Directly supplied Copilot CLI flags take precedence.
+# [profiles.default.copilot]
+# model = "your-model-id"
+# reasoning_effort = "high"         # none | minimal | low | medium | high | xhigh | max
+# context_tier = "long_context"    # default | long_context
+
 [profiles.default]
 `;
 

@@ -21,6 +21,10 @@ copillm copilot --help
 copillm copilot suggest -t shell "list large files"
 ```
 
+Copilot model, reasoning effort, and context defaults can be set per profile in
+`agent.toml`. Explicit Copilot CLI flags on this command override those profile
+defaults. See [Copilot CLI launch preferences](../../mcp/#copilot-cli-launch-preferences).
+
 ## Copillm-backed launch
 
 When the active profile has no external provider:

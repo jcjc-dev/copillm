@@ -211,6 +211,82 @@ headers = { Authorization = "Bearer abc" }
     });
   });
 
+  it("passes profile Copilot defaults while preserving explicit CLI overrides", () => {
+    if (process.platform === "win32") return;
+    if (!tmpHome || !shimDir || !envDumpPath) {
+      throw new Error("test setup did not complete");
+    }
+
+    fs.writeFileSync(
+      path.join(tmpHome, "agent.toml"),
+      `
+[profiles.work.copilot]
+model = "copilot-test-model"
+reasoning_effort = "high"
+context_tier = "long_context"
+`
+    );
+
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      PATH: `${shimDir}:${process.env.PATH ?? ""}`,
+      COPILLM_HOME: tmpHome,
+      COPILLM_ALLOW_PLAINTEXT_CREDENTIALS: "1",
+      COPILLM_USE_SYSTEM_AGENT: "1"
+    };
+    delete env.COPILOT_GITHUB_TOKEN;
+    delete env.COPILOT_HOME;
+
+    const result = spawnSync(
+      process.execPath,
+      [cliPath, "copilot", "--profile", "work", "-p", "hello"],
+      { env, encoding: "utf8", timeout: 30_000 }
+    );
+    expect(result.error, result.error?.message).toBeUndefined();
+    expect(result.status).toBe(0);
+
+    const dump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as { args: string[] };
+    expect(dump.args).toEqual([
+      "--model",
+      "copilot-test-model",
+      "--reasoning-effort",
+      "high",
+      "--context",
+      "long_context",
+      "-p",
+      "hello"
+    ]);
+
+    const override = spawnSync(
+      process.execPath,
+      [
+        cliPath,
+        "copilot",
+        "--profile",
+        "work",
+        "--model=explicit-test-model",
+        "--context",
+        "default",
+        "-p",
+        "hello"
+      ],
+      { env, encoding: "utf8", timeout: 30_000 }
+    );
+    expect(override.error, override.error?.message).toBeUndefined();
+    expect(override.status).toBe(0);
+
+    const overrideDump = JSON.parse(fs.readFileSync(envDumpPath, "utf8")) as { args: string[] };
+    expect(overrideDump.args).toEqual([
+      "--reasoning-effort",
+      "high",
+      "--model=explicit-test-model",
+      "--context",
+      "default",
+      "-p",
+      "hello"
+    ]);
+  });
+
   it("launches an external provider without GitHub authentication", () => {
     if (process.platform === "win32") return;
     if (!shimDir || !envDumpPath) {
