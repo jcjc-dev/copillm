@@ -168,7 +168,8 @@ export type CopilotLaunchConfig = z.infer<typeof CopilotLaunchSchema>;
 
 const PiLaunchSchema = z
   .object({
-    model: ProviderModelSchema.optional()
+    model: ProviderModelSchema.optional(),
+    thinking_level: z.enum(["off", "minimal", "low", "medium", "high", "xhigh", "max"]).optional()
   })
   .strict();
 
@@ -290,7 +291,7 @@ const SectionSchema = z
     mcp: McpSchema.optional(),
     /** Native Copilot CLI launch defaults; only consumed by `copillm copilot`. */
     copilot: CopilotLaunchSchema.optional(),
-    /** Pi launch defaults such as its default model. */
+    /** Pi launch defaults such as its model and thinking level. */
     pi: PiLaunchSchema.optional(),
     provider: ExternalProviderSchema.optional(),
     /** Profile-scoped pi custom model providers (rendered into pi's models.json). */
