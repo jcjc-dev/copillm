@@ -209,17 +209,21 @@ These preferences affect only `copillm copilot`, not other agent launchers.
 
 ## Pi launch preferences
 
-Set Pi's default model in `[defaults.pi]` or override it per profile in
-`[profiles.<name>.pi]`. The model is passed to the Pi launch as `--model`; an
-explicit `copillm pi --model ...` takes precedence. This does not modify Pi's
-own `settings.json`.
+Set Pi's default model and thinking level in `[defaults.pi]`, or override either
+per profile in `[profiles.<name>.pi]`. These are passed to the Pi launch as
+`--model` and `--thinking` defaults; explicit CLI selections take precedence.
+This does not modify Pi's own `settings.json`. Thinking levels are `off`,
+`minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; the selected model may
+limit which levels it supports.
 
 ```toml
 [defaults.pi]
 model = "gpt-6-luna"
+thinking_level = "xhigh"
 
 [profiles.work.pi]
 model = "another-model"
+thinking_level = "high"
 ```
 
 When a profile selects an external provider, that provider's configured model

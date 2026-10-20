@@ -17,7 +17,7 @@ import { launchAgent } from "../../launchAgent.js";
 import { refreshPiHome } from "../../integrations/refreshPi.js";
 import { defaultOutputDir as defaultPiOutputDir } from "../../../integrations/pi/init.js";
 import { isPiNativeCopilotEnabled } from "../../../integrations/pi/mode.js";
-import { applyPiModelDefault } from "../../../agentconfig/piLaunch.js";
+import { applyPiModelDefault, applyPiThinkingDefault } from "../../../agentconfig/piLaunch.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
@@ -137,7 +137,10 @@ export function register(program: Command): void {
           agent: "pi",
           flag: opts.yolo,
           applyResult,
-          baseArgs: applyPiModelDefault(baseArgs, modelDefault)
+          baseArgs: applyPiThinkingDefault(
+            applyPiModelDefault(baseArgs, modelDefault),
+            loaded?.resolved.pi?.thinking_level
+          )
         });
         const exitCode = await launchAgent({
           agent: "pi",

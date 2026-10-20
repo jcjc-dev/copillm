@@ -30,6 +30,7 @@ body = ""
 
 [defaults.pi]
 model = "gpt-6-luna"
+# thinking_level = "xhigh" # off | minimal | low | medium | high | xhigh | max
 
 # Uncomment to add an MCP server visible to every profile:
 # [defaults.mcp.servers.github]

@@ -41,7 +41,7 @@ copillm --debug pi                   # copillm daemon diagnostics
 
 ## What it does
 
-When the active profile has no external provider, copillm uses native Copilot mode by default: it obtains a Copilot token, configures pi's built-in `github-copilot` provider for the account's API host, and does not start the copillm daemon. Pi's default model comes from `[defaults.pi] model` in `~/.copillm/agent.toml`; copillm passes that as pi's `--model` default without editing Pi's `settings.json`.
+When the active profile has no external provider, copillm uses native Copilot mode by default: it obtains a Copilot token, configures pi's built-in `github-copilot` provider for the account's API host, and does not start the copillm daemon. Pi's default model and thinking level can come from `[defaults.pi] model` and `thinking_level` in `~/.copillm/agent.toml`; copillm passes them as `--model` and `--thinking` defaults without editing Pi's `settings.json`. Explicit CLI options take precedence.
 
 Set `COPILLM_PI_NATIVE_COPILOT=0` to use the retained legacy flow instead: it starts the daemon and refreshes pi's copillm proxy model catalogue. Other false-like values (`false`, `no`, `off`, or empty) also select the legacy flow.
 
@@ -94,11 +94,12 @@ The launch is validated up front: an unknown, malformed, or not-logged-in accoun
 | `COPILLM_PORT` | Override the daemon port (default `4141`, used by the legacy proxy path). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |
 
-Configure the default model in `agent.toml` (the scaffold sets it to `gpt-6-luna`):
+Configure the default model and optional thinking level in `agent.toml` (the scaffold sets the model to `gpt-6-luna`):
 
 ```toml
 [defaults.pi]
 model = "gpt-6-luna"
+thinking_level = "xhigh"
 ```
 
-A profile can override it with `[profiles.<name>.pi] model = "…"`. A command-line `--model` always takes precedence. The model must be available to your Copilot account.
+Supported levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. A profile can override either with `[profiles.<name>.pi]`. Explicit command-line `--model` / `--thinking` selections take precedence. The model must be available to your Copilot account and support the selected level.

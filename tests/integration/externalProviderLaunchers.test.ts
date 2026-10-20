@@ -46,6 +46,9 @@ function writeExternalProfile(home: string): void {
     `
 active_profile = "local"
 
+[defaults.pi]
+thinking_level = "xhigh"
+
 [profiles.local.provider]
 id = "local-provider"
 name = "Local Provider"
@@ -158,6 +161,7 @@ describe("external provider agent launchers", () => {
 
       const dump = JSON.parse(fs.readFileSync(dumpPath, "utf8")) as {
         agent: string;
+        args: string[];
         CODEX_HOME: string;
         PI_CODING_AGENT_DIR: string;
         COPILOT_GITHUB_TOKEN: string;
@@ -167,6 +171,8 @@ describe("external provider agent launchers", () => {
       expect(dump.CODEX_HOME).toBe("");
       expect(dump.PI_CODING_AGENT_DIR).toBe(expectedAgentDir);
       expect(dump.COPILOT_GITHUB_TOKEN).toBe("");
+      expect(dump.args).toContain("--thinking");
+      expect(dump.args).toContain("xhigh");
 
       const models = JSON.parse(
         fs.readFileSync(path.join(expectedAgentDir, "models.json"), "utf8")

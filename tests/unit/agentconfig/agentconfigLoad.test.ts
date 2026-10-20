@@ -179,10 +179,11 @@ context_tier = "default"
     });
   });
 
-  it("merges Pi launch model defaults field-by-field across layers", () => {
+  it("merges Pi launch defaults field-by-field across layers", () => {
     writeGlobal(`
 [defaults.pi]
 model = "gpt-6-luna"
+thinking_level = "xhigh"
 
 [profiles.work.pi]
 model = "profile-model"
@@ -190,14 +191,26 @@ model = "profile-model"
     writeProject(`
 [profiles.work.pi]
 model = "project-model"
+thinking_level = "high"
 `);
 
     expect(loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })?.resolved.pi).toEqual({
-      model: "project-model"
+      model: "project-model",
+      thinking_level: "high"
     });
     expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.pi).toEqual({
-      model: "gpt-6-luna"
+      model: "gpt-6-luna",
+      thinking_level: "xhigh"
     });
+  });
+
+  it("rejects unsupported Pi thinking levels", () => {
+    writeGlobal(`
+[defaults.pi]
+thinking_level = "extreme"
+`);
+
+    expect(() => loadAgentConfig({ cwd: tmpCwd })).toThrow(/schema/i);
   });
 
   it("rejects unsupported Copilot reasoning effort and context tiers", () => {
