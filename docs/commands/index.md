@@ -25,7 +25,7 @@ Agent arguments still belong after the agent command. For example, `copillm --de
 | [`claude`](claude/) | Launch Claude Code, fully wired against the local daemon. |
 | [`codex`](codex/) | Launch Codex CLI, fully wired against the local daemon. |
 | [`copilot`](copilot/) | Launch GitHub Copilot CLI with the stored GitHub token injected (no second device-flow login). |
-| [`pi`](pi/) | Launch the pi coding agent, fully wired against the local daemon. |
+| [`pi`](pi/) | Launch pi with native GitHub Copilot by default (`gpt-6-luna`); opt into the local proxy with `COPILLM_PI_NATIVE_COPILOT=0`. |
 | [`daemon`](daemon/) | Start, stop, and inspect the background proxy daemon. |
 | [`env`](env/) | Emit the environment block for manual agent wiring. |
 | [`models`](models/) | List the upstream model catalogue and pin which models are advertised. |

@@ -12,6 +12,7 @@ import { applyAgentConfig, formatApplyNotes } from "../agentconfig/apply.js";
 import type { AgentKind } from "../agentconfig/render.js";
 import { resolveSessionScope } from "../agentconfig/sessionScope.js";
 import { buildClaudeEnvBundle } from "./agentEnv.js";
+import { isPiNativeCopilotEnabled } from "../integrations/pi/mode.js";
 
 const SCAFFOLD_TOML = `# copillm agent config — one source of truth for instructions and MCP servers
 # fanned out to each coding agent on \`copillm <agent>\` launch.
@@ -26,6 +27,9 @@ active_profile = "default"
 
 [defaults.instructions]
 body = ""
+
+[defaults.pi]
+model = "gpt-6-luna"
 
 # Uncomment to add an MCP server visible to every profile:
 # [defaults.mcp.servers.github]
@@ -223,8 +227,9 @@ export function registerConfigCommands(program: Command): void {
           process.stdout.write("(no agent.toml — nothing to do)\n");
         }
         // Discover + render profile-scoped pi model providers into pi's models.json.
-        // Gated behind the non-default COPILLM_PI_NATIVE_COPILOT feature flag.
-        if (agent === "pi" && result.active !== null && isNativeCopilotFlagEnabled()) {
+        // Native Copilot mode is the default; COPILLM_PI_NATIVE_COPILOT=0 opts
+        // into the legacy proxy path and skips this native-provider setup.
+        if (agent === "pi" && result.active !== null && isPiNativeCopilotEnabled()) {
           const loaded = loadAgentConfig({ cwd: process.cwd(), profileOverride });
           const piModels = loaded?.resolved.piModels ?? {};
           if (Object.keys(piModels).length > 0) {
@@ -240,14 +245,6 @@ export function registerConfigCommands(program: Command): void {
         handleAgentConfigError(error);
       }
     });
-}
-
-function isNativeCopilotFlagEnabled(): boolean {
-  const value = process.env.COPILLM_PI_NATIVE_COPILOT;
-  if (value === undefined) {
-    return false;
-  }
-  return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
 function handleAgentConfigError(error: unknown): never {

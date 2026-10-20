@@ -43,13 +43,13 @@ The token is **never** printed. The `(Your Name)` part shows only when your disp
 
 ## 2. Launch an agent
 
-The fastest path — copillm auto-starts the daemon and installs the agent on demand:
+The fastest path — copillm installs agents on demand and configures their Copilot access. Claude Code and Codex use the local daemon; pi uses its native GitHub Copilot provider by default without starting the daemon.
 
 ```bash
 copillm claude     # launches Claude Code
 copillm codex      # launches Codex CLI
 copillm copilot    # launches GitHub Copilot CLI (reuses your stored token)
-copillm pi         # launches the pi coding agent
+copillm pi         # launches pi with native Copilot; default model is gpt-6-luna
 ```
 
 Extra args are forwarded to the underlying agent:

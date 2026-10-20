@@ -179,6 +179,27 @@ context_tier = "default"
     });
   });
 
+  it("merges Pi launch model defaults field-by-field across layers", () => {
+    writeGlobal(`
+[defaults.pi]
+model = "gpt-6-luna"
+
+[profiles.work.pi]
+model = "profile-model"
+`);
+    writeProject(`
+[profiles.work.pi]
+model = "project-model"
+`);
+
+    expect(loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })?.resolved.pi).toEqual({
+      model: "project-model"
+    });
+    expect(loadAgentConfig({ cwd: tmpCwd })?.resolved.pi).toEqual({
+      model: "gpt-6-luna"
+    });
+  });
+
   it("rejects unsupported Copilot reasoning effort and context tiers", () => {
     writeGlobal(`
 [profiles.work.copilot]

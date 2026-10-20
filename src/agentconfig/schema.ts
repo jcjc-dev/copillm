@@ -9,7 +9,7 @@ import { z } from "zod";
  * same key (e.g. `[profiles.work.mcp.servers.<name>]` replaces the same-named
  * `[defaults.mcp.servers.<name>]`). There is no way to *remove* a default from
  * a profile — defaults are intentionally always-on. Rendered sections include
- * `instructions`, `mcp`, `provider`, `pi_models`, `copilot`, and `yolo`. The
+ * `instructions`, `mcp`, `provider`, `pi`, `pi_models`, `copilot`, and `yolo`. The
  * sections (`skills`, `agents`, `hooks`, `permissions`) remain reserved-but-
  * permissive so users can start populating them without future TOML breaking.
  * `session_scope` controls whether downstream agent state uses the historical
@@ -166,6 +166,14 @@ const CopilotLaunchSchema = z
 
 export type CopilotLaunchConfig = z.infer<typeof CopilotLaunchSchema>;
 
+const PiLaunchSchema = z
+  .object({
+    model: ProviderModelSchema.optional()
+  })
+  .strict();
+
+export type PiLaunchConfig = z.infer<typeof PiLaunchSchema>;
+
 /**
  * A provider is deliberately credential-by-reference: api_key_env names an
  * environment variable but no secret value can be placed in agent.toml.
@@ -282,6 +290,8 @@ const SectionSchema = z
     mcp: McpSchema.optional(),
     /** Native Copilot CLI launch defaults; only consumed by `copillm copilot`. */
     copilot: CopilotLaunchSchema.optional(),
+    /** Pi launch defaults such as its default model. */
+    pi: PiLaunchSchema.optional(),
     provider: ExternalProviderSchema.optional(),
     /** Profile-scoped pi custom model providers (rendered into pi's models.json). */
     pi_models: z.record(PiModelProviderSchema).optional(),
@@ -319,6 +329,8 @@ export interface ResolvedProfile {
   provider: ExternalProviderConfig | null;
   /** Native Copilot CLI defaults for model, reasoning effort, and context tier. */
   copilot: CopilotLaunchConfig | null;
+  /** Pi launch preferences merged from defaults, profile, and project layers. */
+  pi: PiLaunchConfig | null;
   /** Profile-scoped pi custom model providers keyed by provider id. */
   piModels: Record<string, PiModelProviderConfig>;
   /** Resolved downstream agent state policy; defaults to the legacy shared paths. */

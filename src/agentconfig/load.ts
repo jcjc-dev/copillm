@@ -9,6 +9,7 @@ import {
   type CopilotLaunchConfig,
   type ExternalProviderConfig,
   type McpServerEntry,
+  type PiLaunchConfig,
   type PiModelProviderConfig,
   type ResolvedProfile,
   type SessionScope,
@@ -209,9 +210,10 @@ function mergeAndResolve(input: {
 
   const yolo = mergeYolo(sections);
   const copilot = mergeCopilot(sections);
+  const pi = mergePi(sections);
   const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, provider, piModels, copilot, account, sessionScope, yolo, reserved };
+  return { instructions, mcpServers: servers, provider, piModels, copilot, pi, account, sessionScope, yolo, reserved };
 }
 
 interface ScopedSection {
@@ -267,6 +269,18 @@ function mergeCopilot(layers: Section[]): CopilotLaunchConfig | null {
     Object.assign(copilot, layer.copilot);
   }
   return saw ? copilot : null;
+}
+
+/** Merge Pi launch defaults field-by-field across config layers. */
+function mergePi(layers: Section[]): PiLaunchConfig | null {
+  let saw = false;
+  const pi: PiLaunchConfig = {};
+  for (const layer of layers) {
+    if (!layer.pi) continue;
+    saw = true;
+    Object.assign(pi, layer.pi);
+  }
+  return saw ? pi : null;
 }
 
 function mergeRecord(layers: Section[], key: keyof Section): Record<string, unknown> {

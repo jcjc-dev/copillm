@@ -207,6 +207,24 @@ copillm copilot --profile work --model another-model
 
 These preferences affect only `copillm copilot`, not other agent launchers.
 
+## Pi launch preferences
+
+Set Pi's default model in `[defaults.pi]` or override it per profile in
+`[profiles.<name>.pi]`. The model is passed to the Pi launch as `--model`; an
+explicit `copillm pi --model ...` takes precedence. This does not modify Pi's
+own `settings.json`.
+
+```toml
+[defaults.pi]
+model = "gpt-6-luna"
+
+[profiles.work.pi]
+model = "another-model"
+```
+
+When a profile selects an external provider, that provider's configured model
+is used instead of this Copilot model preference.
+
 ## External model providers
 
 A profile can select one OpenAI-compatible, Azure-compatible, or
