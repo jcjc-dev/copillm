@@ -5,11 +5,10 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 // Regression guard: when the user runs `copillm codex|claude|pi` without
-// being logged in, the launcher must surface a clear "Not authenticated"
-// message instead of the misleading "Auto-start of copillm daemon timed
-// out" error that used to happen because the detached daemon would die
-// silently on missing credentials and the launcher only saw the readiness
-// timeout.
+// being logged in, the launcher must surface an actionable missing-credential
+// message instead of the misleading "Auto-start of copillm daemon timed out"
+// error that used to happen because the detached daemon would die silently on
+// missing credentials and the launcher only saw the readiness timeout.
 
 const cliPath = path.resolve(__dirname, "..", "..", "dist", "cli.js");
 
@@ -42,8 +41,8 @@ describe("agent launcher when not authenticated", () => {
 
         // Must NOT surface the old generic timeout message.
         expect(result.stderr).not.toMatch(/Auto-start of copillm daemon timed out/);
-        // Must surface an actionable login hint.
-        expect(result.stderr).toMatch(/Not authenticated/);
+        // Agent launchers use agent-specific actionable missing-credential messages.
+        expect(result.stderr).toMatch(/Not authenticated|No stored GitHub credential/);
         expect(result.stderr).toMatch(/copillm auth login/);
         // And it must fail fast — well under the 10s daemon-readiness timeout.
         expect(elapsedMs).toBeLessThan(5000);
