@@ -72,6 +72,8 @@ function launch(
     COPILLM_PROFILE: "local",
     COPILLM_USE_SYSTEM_AGENT: "1"
   };
+  delete env.PI_CODING_AGENT_DIR;
+  delete env.COPILLM_PI_NATIVE_COPILOT;
   delete env.COPILLM_GITHUB_TOKEN;
   delete env.GH_TOKEN;
   delete env.GITHUB_TOKEN;

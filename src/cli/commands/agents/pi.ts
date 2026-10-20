@@ -4,6 +4,7 @@ import path from "node:path";
 import { applyAgentConfig, formatApplyNotes } from "../../../agentconfig/apply.js";
 import { loadAgentConfig, type LoadResult } from "../../../agentconfig/load.js";
 import { CopilotTokenManager } from "../../../auth/copilotToken.js";
+import { ensureSecureDirectory, writeFileSecureAtomic } from "../../../config/fsSecurity.js";
 import { loadStoredCredential } from "../../../auth/credentials.js";
 import { buildPiEnvBundle } from "../../agentEnv.js";
 import { getCopillmHome, piAgentDir } from "../../../config/home.js";
@@ -15,6 +16,8 @@ import { ensureDaemonRunningForLauncher } from "../../daemon/ensureRunning.js";
 import { launchAgent } from "../../launchAgent.js";
 import { refreshPiHome } from "../../integrations/refreshPi.js";
 import { defaultOutputDir as defaultPiOutputDir } from "../../../integrations/pi/init.js";
+import { isPiNativeCopilotEnabled } from "../../../integrations/pi/mode.js";
+import { applyPiModelDefault } from "../../../agentconfig/piLaunch.js";
 import { enableRuntimeDebug, resolveCopillmDebug } from "../../shared/debug.js";
 import { applyYoloForLaunch, formatLaunchAccountNotice, resolveLaunchAccount } from "./shared.js";
 import { resolveSessionScope, type SessionScopeResolution } from "../../../agentconfig/sessionScope.js";
@@ -22,7 +25,7 @@ import { resolveSessionScope, type SessionScopeResolution } from "../../../agent
 export function register(program: Command): void {
   program
     .command("pi")
-    .description("Launch pi coding agent against copillm (auto-starts daemon, downloads pi if missing)")
+    .description("Launch pi coding agent with native Copilot by default (downloads pi if missing)")
     .allowUnknownOption(true)
     .helpOption(false)
     .argument("[args...]", "Args forwarded to pi")
@@ -31,7 +34,6 @@ export function register(program: Command): void {
         const { opts, forwarded } = processCopillmArgs(forwardedArgs ?? []);
         const debug = resolveCopillmDebug(opts.copillmDebug);
         const profileOverride = opts.copillmProfile ?? process.env.COPILLM_PROFILE ?? null;
-        const nativeCopilot = opts.copillmCopilot === true || isCopilotEnvEnabled();
         let sessionScope: SessionScopeResolution;
         let launchAccount;
         let loaded: LoadResult | null;
@@ -56,6 +58,8 @@ export function register(program: Command): void {
         if (launchAccount) {
           process.stderr.write(`${formatLaunchAccountNotice(launchAccount)}\n`);
         }
+        const nativeCopilot =
+          opts.copillmCopilot === true || (isPiNativeCopilotEnabled() && !loaded?.resolved.provider);
         enableRuntimeDebug(debug);
         const mirrorDir = defaultPiOutputDir(
           getCopillmHome(),
@@ -112,8 +116,8 @@ export function register(program: Command): void {
           process.stderr.write(`${line}\n`);
         }
         // Profile-scoped pi model providers: discover their /models endpoint and
-        // merge into the pi agent dir's models.json. Gated behind the same
-        // non-default feature flag as native Copilot mode.
+        // merge into the pi agent dir's models.json. Enabled in native mode by
+        // default; COPILLM_PI_NATIVE_COPILOT=0 retains the legacy proxy path.
         const piModels = nativeCopilot ? (loaded?.resolved.piModels ?? {}) : {};
         if (Object.keys(piModels).length > 0) {
           const agentDir = piAgentDir(sessionScope.scope, sessionScope.profileName);
@@ -128,7 +132,13 @@ export function register(program: Command): void {
           ...(copilotToken ? { COPILOT_GITHUB_TOKEN: copilotToken } : {})
         };
         const baseArgs = [...forwarded, ...applyResult.cliArgs];
-        const args = applyYoloForLaunch({ agent: "pi", flag: opts.yolo, applyResult, baseArgs });
+        const modelDefault = loaded?.resolved.provider ? undefined : loaded?.resolved.pi?.model;
+        const args = applyYoloForLaunch({
+          agent: "pi",
+          flag: opts.yolo,
+          applyResult,
+          baseArgs: applyPiModelDefault(baseArgs, modelDefault)
+        });
         const exitCode = await launchAgent({
           agent: "pi",
           args,
@@ -139,14 +149,6 @@ export function register(program: Command): void {
         process.exit(exitCode);
       }
     );
-}
-
-function isCopilotEnvEnabled(): boolean {
-  const value = process.env.COPILLM_PI_NATIVE_COPILOT;
-  if (value === undefined) {
-    return false;
-  }
-  return !["", "0", "false", "no", "off"].includes(value.trim().toLowerCase());
 }
 
 /**
@@ -190,6 +192,7 @@ const COPILLM_PROXY_PROVIDER_IDS = new Set(["copillm", "copillm-responses"]);
  * COPILOT_GITHUB_TOKEN) are left untouched.
  */
 function writeNativeCopilotModels(agentDir: string, accountType: AccountType): void {
+  ensureSecureDirectory(agentDir);
   const modelsPath = path.join(agentDir, "models.json");
   let doc: Record<string, unknown> = {};
   try {
@@ -214,5 +217,5 @@ function writeNativeCopilotModels(agentDir: string, accountType: AccountType): v
   copilot.baseUrl = copilotBaseUrl(accountType);
   providers["github-copilot"] = copilot;
   doc.providers = providers;
-  fs.writeFileSync(modelsPath, `${JSON.stringify(doc, null, 2)}\n`);
+  writeFileSecureAtomic(modelsPath, `${JSON.stringify(doc, null, 2)}\n`, 0o600);
 }

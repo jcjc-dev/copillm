@@ -7,7 +7,7 @@ nav_order: 5
 
 # `copillm pi`
 
-Launch the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), fully wired against the local copillm daemon.
+Launch the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent), using pi's native GitHub Copilot provider by default. Set `COPILLM_PI_NATIVE_COPILOT=0` to opt into the legacy local copillm proxy path.
 
 ```bash
 copillm [--debug] pi [args...]
@@ -41,20 +41,19 @@ copillm --debug pi                   # copillm daemon diagnostics
 
 ## What it does
 
-When the active profile has no external provider:
+When the active profile has no external provider, copillm uses native Copilot mode by default: it obtains a Copilot token, configures pi's built-in `github-copilot` provider for the account's API host, and does not start the copillm daemon. Pi's default model comes from `[defaults.pi] model` in `~/.copillm/agent.toml`; copillm passes that as pi's `--model` default without editing Pi's `settings.json`.
 
-1. Starts the copillm daemon in the background if it is not already running.
-2. Refreshes pi's copillm model list in copillm's own agent dir (`~/.copillm/pi/agent` in shared mode, or the selected profile's isolated directory, via `PI_CODING_AGENT_DIR`) so pi sees the live Copilot catalogue. copillm never writes your real `~/.pi`.
-3. Resolves the pi binary in this order:
-   1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_PI_VERSION` environment variable
-   2. A cached install at `~/.copillm/bin/pi/<version>/`, using the most recently checked version when available
-   3. Otherwise, a fresh install of the latest `@earendil-works/pi-coding-agent` into `~/.copillm/bin/pi/<version>/`
+Set `COPILLM_PI_NATIVE_COPILOT=0` to use the retained legacy flow instead: it starts the daemon and refreshes pi's copillm proxy model catalogue. Other false-like values (`false`, `no`, `off`, or empty) also select the legacy flow.
 
-   > **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `pi` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+Then copillm resolves the pi binary in this order:
 
-   Version checks are cached for 24 hours. When a check is due and a cached version is available, copillm launches the newest cached install immediately and refreshes version information in the background. If a newer version is found, it is installed on a later launch. A first launch with no cached install still needs to check for and download a version.
-4. Injects the environment variables pi requires to talk to the local daemon.
-5. Forwards stdin/stdout/stderr to the agent and exits with the agent's exit code.
+1. `--copillm-use <pkg>@<ver>` flag or the `COPILLM_PI_VERSION` environment variable
+2. A cached install at `~/.copillm/bin/pi/<version>/`, using the most recently checked version when available
+3. Otherwise, a fresh install of the latest `@earendil-works/pi-coding-agent` into `~/.copillm/bin/pi/<version>/`
+
+> **Opt-in PATH fallback.** Set `COPILLM_USE_SYSTEM_AGENT=1` (or `true`/`yes`) to additionally consider a system `pi` on `PATH` (checked before the cache when no version is pinned). Off by default so the version copillm runs is always the one it manages.
+
+Version checks are cached for 24 hours. When a check is due and a cached version is available, copillm launches the newest cached install immediately and refreshes version information in the background. If a newer version is found, it is installed on a later launch. A first launch with no cached install still needs to check for and download a version. Finally, copillm injects pi's environment and forwards stdin/stdout/stderr to the agent.
 
 When the active profile contains `[profiles.<name>.provider]`, copillm
 instead writes a single external provider to pi's copillm-owned
@@ -81,15 +80,25 @@ copillm prints a one-line notice naming the account whenever one is chosen by fl
 copillm: using account "work" (from --account)
 ```
 
-The launch is validated up front: an unknown, malformed, or not-logged-in account fails fast with a clear error. pi's model list is also refreshed as the selected account, so its catalogue matches that account's entitlements. Under the hood pi is pointed at `http://127.0.0.1:4141/<account>/anthropic`; see [Selecting an account](../../http-api/#selecting-an-account) for the routing details.
+The launch is validated up front: an unknown, malformed, or not-logged-in account fails fast with a clear error. Native mode uses that account's Copilot token and account-specific API host. In legacy mode (`COPILLM_PI_NATIVE_COPILOT=0`), pi's proxy model list is refreshed for that account and requests route through `http://127.0.0.1:4141/<account>/anthropic`; see [Selecting an account](../../http-api/#selecting-an-account) for the routing details.
 
 ## Related environment variables
 
 | Variable | Purpose |
 | --- | --- |
 | `COPILLM_PI_VERSION` | Pin a specific pi version. |
+| `COPILLM_PI_NATIVE_COPILOT` | Native GitHub Copilot mode is the default; set to `0` to use the legacy local-proxy path. |
 | `COPILLM_ACCOUNT` | Account to launch against when `--account` is not passed. See [Account selection](#account-selection). |
 | `COPILLM_PROFILE` | Default profile selection used when `--copillm-profile` is not passed. |
 | `PI_CODING_AGENT_DIR` | Explicitly override the pi config/session directory; this takes precedence over profile isolation. |
-| `COPILLM_PORT` | Override the daemon port (default `4141`). |
+| `COPILLM_PORT` | Override the daemon port (default `4141`, used by the legacy proxy path). |
 | `COPILLM_LOG_FILE` | Override the debug log path used when copillm auto-starts the daemon with `--debug`. |
+
+Configure the default model in `agent.toml` (the scaffold sets it to `gpt-6-luna`):
+
+```toml
+[defaults.pi]
+model = "gpt-6-luna"
+```
+
+A profile can override it with `[profiles.<name>.pi] model = "…"`. A command-line `--model` always takes precedence. The model must be available to your Copilot account.

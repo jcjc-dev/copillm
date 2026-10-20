@@ -662,6 +662,8 @@ function runCli(args: string[], extraEnv: Record<string, string>): Promise<CliRe
   // Drop a leading "--" sentinel that callers may use to defeat shell parsing.
   const cleanedArgs = args[0] === "--" ? args.slice(1) : args;
   const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+  // The runner must use each fake COPILLM_HOME, not a developer's Pi config dir.
+  delete env.PI_CODING_AGENT_DIR;
   return new Promise<CliResult>((resolve) => {
     const child = spawn(process.execPath, [CLI_ENTRY, ...cleanedArgs], {
       env,

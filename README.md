@@ -46,10 +46,11 @@ To return to the stable channel, reinstall without the tag: `npm install -g copi
 # Authenticate once via the GitHub device flow.
 copillm login
 
-# Launch an agent. copillm starts the local daemon, installs the agent if
-# necessary, and configures the required environment variables.
+# Launch an agent. copillm installs it if necessary and configures its
+# environment; pi uses native Copilot by default and does not need the daemon.
 copillm claude
 copillm codex
+copillm pi        # pi uses native GitHub Copilot; default model: gpt-6-luna
 copillm copilot   # GitHub Copilot CLI, signed in with copillm's token
 ```
 

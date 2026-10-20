@@ -7,7 +7,7 @@ nav_order: 6
 
 # Daemon commands
 
-The copillm daemon is a local HTTP proxy that exposes OpenAI- and Anthropic-compatible endpoints on `http://127.0.0.1:4141`. The `copillm claude`, `copillm codex`, and `copillm pi` launchers manage the daemon automatically; the commands below are for manual control and inspection.
+The copillm daemon is a local HTTP proxy that exposes OpenAI- and Anthropic-compatible endpoints on `http://127.0.0.1:4141`. The `copillm claude` and `copillm codex` launchers manage the daemon automatically; `copillm pi` uses native Copilot by default and starts the daemon only in legacy mode (`COPILLM_PI_NATIVE_COPILOT=0`). The commands below are for manual control and inspection.
 
 ## `copillm start`
 

@@ -46,6 +46,8 @@ export async function startCopillmAgainstMock(options: StartCopillmOptions): Pro
     COPILLM_TOKEN_EXCHANGE_URL: options.tokenExchangeUrl,
     COPILLM_GITHUB_USER_URL: options.githubUserUrl
   };
+  // Keep a developer's explicit Pi directory from escaping this fake home.
+  delete env.PI_CODING_AGENT_DIR;
 
   const child = spawn(process.execPath, args, {
     env,
