@@ -2,9 +2,14 @@ import type { ApplyResult } from "../../../agentconfig/render.js";
 import { applyYolo, resolveYoloWithSource } from "../../../agents/registry.js";
 import type { AgentName } from "../../../integrations/registry.js";
 import { loadAgentConfig } from "../../../agentconfig/load.js";
-import { findAccount } from "../../../auth/accounts.js";
+import { findAccount, readAccountsIndex } from "../../../auth/accounts.js";
 import { assertValidAccountId } from "../../../config/accountId.js";
-import { loadStoredCredentialForAccount } from "../../../auth/credentials.js";
+import {
+  loadStoredCredential,
+  loadStoredCredentialForAccount,
+  type StoredCredential
+} from "../../../auth/credentials.js";
+import { inspectGithubIdentity } from "../../../auth/githubIdentity.js";
 import type { AccountDiscoveryOverride } from "../../../integrations/codex/init.js";
 
 /**
@@ -61,6 +66,22 @@ export async function resolveLaunchAccount(input: {
   assertValidAccountId(requested);
   const record = findAccount(requested);
   if (!record) {
+    // A single-account install has no accounts index, so the sole (legacy)
+    // credential has no entry to resolve by id. If the requested login matches
+    // that account's GitHub login, route it as the default account instead of
+    // failing — this lets a profile pin the only account before a second login
+    // materializes an index. With an index, an unregistered account is still
+    // genuinely unknown and falls through to the error below.
+    const legacy = await resolveLegacyMatch(requested);
+    if (legacy) {
+      return {
+        accountId: requested,
+        pathPrefix: "",
+        cacheId: undefined,
+        account: { accountType: legacy.accountType, githubToken: legacy.token, cacheId: undefined },
+        source: source!
+      };
+    }
     throw new Error(`Unknown account "${requested}". Run \`copillm auth status\` to list accounts.`);
   }
   const credential = await loadStoredCredentialForAccount(requested);
@@ -75,6 +96,28 @@ export async function resolveLaunchAccount(input: {
     account: { accountType: credential.accountType, githubToken: credential.token, cacheId },
     source: source!
   };
+}
+
+/**
+ * When no accounts index exists, check whether the requested id matches the
+ * sole (legacy) credential's GitHub login. Returns the credential on a match so
+ * the caller can route it as the default account, or null when there's no
+ * index-independent way to treat `requested` as an existing account.
+ */
+async function resolveLegacyMatch(requested: string): Promise<null | StoredCredential> {
+  // A real multi-account index means an unregistered id is genuinely unknown.
+  if (readAccountsIndex()) {
+    return null;
+  }
+  const credential = await loadStoredCredential();
+  if (!credential) {
+    return null;
+  }
+  const identity = await inspectGithubIdentity({ token: credential.token });
+  if (!identity || identity.login !== requested) {
+    return null;
+  }
+  return credential;
 }
 
 export function formatLaunchAccountNotice(resolved: ResolvedLaunchAccount): string {

@@ -7,7 +7,7 @@ export interface PackageInfo {
 
 const FALLBACK_PACKAGE_INFO: PackageInfo = {
   name: "copillm",
-  version: "0.5.2"
+  version: "0.5.3"
 };
 
 export function getPackageInfo(): PackageInfo {
