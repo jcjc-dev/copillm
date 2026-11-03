@@ -108,6 +108,7 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
     }
     const result = await addAccount({ id: accountId, accountType, token, mode: saveMode, makeDefault: true });
     emitLoginResult(opts, result);
+    await stopDaemonForLoginChange();
     return;
   }
 
@@ -126,6 +127,7 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
       const targetId = newLogin ?? index.defaultAccount;
       const result = await addAccount({ id: targetId, accountType, token, mode: saveMode, makeDefault: true });
       emitLoginResult(opts, result);
+      await stopDaemonForLoginChange();
       return;
     }
     // Fresh single-account install: store without creating an index.
@@ -135,6 +137,7 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
       action: "login",
       credential_backend: backend
     });
+    await stopDaemonForLoginChange();
     return;
   }
 
@@ -157,6 +160,7 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
     // clearly intend to use right now.
     const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode, makeDefault: true });
     emitLoginResult(opts, result);
+    await stopDaemonForLoginChange();
     return;
   }
 
@@ -170,6 +174,7 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
       action: "login",
       credential_backend: backend
     });
+    await stopDaemonForLoginChange();
     return;
   }
 
@@ -179,6 +184,18 @@ export async function runAuthLogin(opts: AuthLoginOpts, options: { forceSession:
   registerExistingCredentialAsDefault(existingLogin ?? "default", existing.accountType);
   const result = await addAccount({ id: newLogin, accountType, token, mode: saveMode, makeDefault: true });
   emitLoginResult(opts, result);
+  await stopDaemonForLoginChange();
+}
+
+/**
+ * A running daemon snapshots the default account at startup, so a new login
+ * (which can add an account and change the default) only affects new launches
+ * after the daemon is restarted. Stop it so the next launch picks up the fresh
+ * account state automatically. Safe to call on every login — when no daemon is
+ * running this is a no-op.
+ */
+async function stopDaemonForLoginChange(): Promise<void> {
+  await stopRunningDaemon();
 }
 
 function emitLoginResult(opts: AuthLoginOpts, result: AddAccountResult): void {
