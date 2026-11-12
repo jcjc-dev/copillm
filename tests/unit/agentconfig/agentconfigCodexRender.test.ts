@@ -47,6 +47,9 @@ describe("codex renderer", () => {
     fs.writeFileSync(
       path.join(tmpHome, "agent.toml"),
       `
+[defaults.mcp]
+startup_timeout_ms = 120000
+
 [defaults.mcp.servers.echo]
 transport = "stdio"
 command = "echo"
@@ -86,7 +89,9 @@ headers = { Authorization = "Bearer abc", X-Trace = "1" }
     expect(parsed.mcp_servers?.echo.command).toBe("echo");
     expect(parsed.mcp_servers?.echo.args).toEqual(["hi", "there"]);
     expect(parsed.mcp_servers?.echo.env).toEqual({ LOG_LEVEL: "info", FOO: "bar" });
+    expect(parsed.mcp_servers?.echo.startup_timeout_ms).toBe(120000);
     expect(parsed.mcp_servers?.["remote-api"].url).toBe("https://example.com/mcp");
+    expect(parsed.mcp_servers?.["remote-api"].startup_timeout_ms).toBe(120000);
     expect(parsed.mcp_servers?.["remote-api"].http_headers).toEqual({
       Authorization: "Bearer abc",
       "X-Trace": "1"

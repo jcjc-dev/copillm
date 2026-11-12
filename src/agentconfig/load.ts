@@ -200,6 +200,13 @@ function mergeAndResolve(input: {
     }
   }
 
+  let mcpStartupTimeoutMs: number | null = null;
+  for (const { section } of layers) {
+    if (section.mcp?.startup_timeout_ms !== undefined) {
+      mcpStartupTimeoutMs = section.mcp.startup_timeout_ms;
+    }
+  }
+
   const sections = layers.map((l) => l.section);
   const reserved = {
     skills: mergeRecord(sections, "skills"),
@@ -213,7 +220,19 @@ function mergeAndResolve(input: {
   const pi = mergePi(sections);
   const sessionScope = mergeSessionScope(sections);
 
-  return { instructions, mcpServers: servers, provider, piModels, copilot, pi, account, sessionScope, yolo, reserved };
+  return {
+    instructions,
+    mcpServers: servers,
+    mcpStartupTimeoutMs,
+    provider,
+    piModels,
+    copilot,
+    pi,
+    account,
+    sessionScope,
+    yolo,
+    reserved
+  };
 }
 
 interface ScopedSection {

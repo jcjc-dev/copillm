@@ -75,6 +75,28 @@ scope = "user"
 
 Names must match `^[A-Za-z0-9_-]+$` — letters, digits, dashes, underscores. Anything else is rejected at render time (TOML identifier requirement for the Codex output).
 
+## Shared MCP startup timeout
+
+Set one timeout under `[defaults.mcp]` to apply the same startup limit to every
+configured server where the downstream agent supports one:
+
+```toml
+[defaults.mcp]
+startup_timeout_ms = 120000
+```
+
+An active profile can override it under `[profiles.<name>.mcp]`. The value must
+be an integer from 1 to 4,294,967,295 milliseconds.
+
+copillm maps the value to each agent's native setting: Codex's per-server
+`startup_timeout_ms`, Claude Code's `MCP_TIMEOUT` environment variable, and
+Copilot CLI's per-server `timeout`. Copilot CLI also uses `timeout` for tool
+discovery and tool calls. Pi has no configurable MCP startup timeout; when Pi
+is launched with this setting, copillm reports that it could not apply it.
+Codex's separate `mcp_optional_startup_grace_ms` setting is left unchanged;
+it controls how long Codex waits for optional servers when building the initial
+tool catalog.
+
 ## Profiles & merging
 
 `agent.toml` is layered. At load time, copillm deep-merges these in order:

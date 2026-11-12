@@ -52,6 +52,7 @@ const InstructionsSchema = z
 
 const McpSchema = z
   .object({
+    startup_timeout_ms: z.number().int().min(1).max(4_294_967_295).optional(),
     servers: z.record(McpServerSchema).optional()
   })
   .strict();
@@ -326,6 +327,7 @@ export type AgentToml = z.infer<typeof AgentTomlSchema>;
 export interface ResolvedProfile {
   instructions: { body: string } | null;
   mcpServers: Record<string, McpServerEntry>;
+  mcpStartupTimeoutMs: number | null;
   /** One external provider for Codex, pi, and Copilot CLI, or null for Copillm. */
   provider: ExternalProviderConfig | null;
   /** Native Copilot CLI defaults for model, reasoning effort, and context tier. */

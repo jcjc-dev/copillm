@@ -35,6 +35,9 @@ function writeGlobal(content: string): void {
 describe("applyAgentConfig — claude", () => {
   it("writes mcp.json under ~/.copillm/claude and emits --mcp-config CLI args", () => {
     writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+
 [defaults.mcp.servers.copillm-github]
 transport = "http"
 url = "https://example.com/mcp"
@@ -64,6 +67,7 @@ url = "https://example.com/mcp"
 
     // Launcher must add --mcp-config <managedPath>.
     expect(result.cliArgs).toEqual(["--mcp-config", managedPath]);
+    expect(result.envOverlay.MCP_TIMEOUT).toBe("120000");
   });
 
   it("replaces stale servers on re-run (no merge with prior managed file)", () => {
@@ -119,6 +123,9 @@ body = "Be terse."
 
   it("writes native Claude settings and user MCP config for explicit sync", () => {
     writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+
 [defaults.mcp.servers.copillm-github]
 transport = "http"
 url = "https://example.com/mcp"
@@ -160,12 +167,16 @@ headers = { Authorization = "Bearer abc" }
     expect(settings.env.EXISTING).toBe("1");
     expect(settings.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:4141/anthropic");
     expect(settings.env.ANTHROPIC_AUTH_TOKEN).toBe("copillm-local");
+    expect(settings.env.MCP_TIMEOUT).toBe("120000");
   });
 });
 
 describe("applyAgentConfig — pi", () => {
   it("writes pi's native mcp.json and removes the legacy copillm-mcp extension", () => {
     writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+
 [defaults.mcp.servers.echo]
 transport = "stdio"
 command = "echo"
@@ -174,7 +185,7 @@ env = { FOO = "1" }
 cwd = "/tmp"
 [profiles.default]
 `);
-    applyAgentConfig({ agent: "pi", cwd: tmpCwd });
+    const result = applyAgentConfig({ agent: "pi", cwd: tmpCwd });
     const mcpPath = path.join(tmpHome, "pi", "agent", "mcp.json");
     expect(fs.existsSync(mcpPath)).toBe(true);
     const doc = JSON.parse(fs.readFileSync(mcpPath, "utf8"));
@@ -184,6 +195,9 @@ cwd = "/tmp"
       env: { FOO: "1" },
       cwd: "/tmp"
     });
+    expect(result.notes).toContain(
+      "pi: MCP startup_timeout_ms is not supported by Pi and was not applied."
+    );
     // Legacy no-op extension is gone.
     expect(fs.existsSync(path.join(tmpHome, "pi", "agent", "extensions", "copillm-mcp"))).toBe(false);
   });
@@ -376,6 +390,9 @@ ${extra}
 describe("applyAgentConfig — copilot", () => {
   it("writes Copilot MCP config and emits --additional-mcp-config CLI args", () => {
     writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+
 [defaults.mcp.servers.always_on]
 transport = "stdio"
 command = "echo"
@@ -393,7 +410,9 @@ headers = { Authorization = "Bearer abc", X_Trace = "1" }
     const managedPath = path.join(tmpHome, "copilot", "mcp-config.json");
 
     expect(result.cliArgs).toEqual(["--additional-mcp-config", `@${managedPath}`]);
-    expect(result.notes).toEqual([]);
+    expect(result.notes).toEqual([
+      "Copilot CLI: MCP timeout also applies to tool discovery and tool calls."
+    ]);
     expect(fs.existsSync(managedPath)).toBe(true);
 
     const written = JSON.parse(fs.readFileSync(managedPath, "utf8"));
@@ -403,13 +422,15 @@ headers = { Authorization = "Bearer abc", X_Trace = "1" }
       tools: ["*"],
       args: ["default"],
       env: { DEFAULT_ENV: "1" },
-      cwd: "/tmp"
+      cwd: "/tmp",
+      timeout: 120000
     });
     expect(written.mcpServers.remote).toEqual({
       type: "http",
       url: "https://example.com/mcp",
       tools: ["*"],
-      headers: { Authorization: "Bearer abc", X_Trace: "1" }
+      headers: { Authorization: "Bearer abc", X_Trace: "1" },
+      timeout: 120000
     });
   });
 

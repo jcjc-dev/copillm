@@ -53,6 +53,47 @@ url = "https://example.com/mcp"
     expect(Object.keys(result?.resolved.mcpServers ?? {})).toEqual(["github"]);
   });
 
+  it("merges the shared MCP startup timeout through config layers", () => {
+    writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = 60000
+
+[profiles.work.mcp]
+startup_timeout_ms = 90000
+`);
+    writeProject(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+
+[profiles.work.mcp]
+startup_timeout_ms = 150000
+`);
+
+    expect(loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })?.resolved.mcpStartupTimeoutMs).toBe(
+      150000
+    );
+
+    writeProject(`
+[defaults.mcp]
+startup_timeout_ms = 120000
+`);
+    expect(loadAgentConfig({ cwd: tmpCwd, profileOverride: "work" })?.resolved.mcpStartupTimeoutMs).toBe(
+      120000
+    );
+  });
+
+  it("rejects MCP startup timeouts outside the supported integer range", () => {
+    for (const startupTimeoutMs of [0, 4_294_967_296]) {
+      writeGlobal(`
+[defaults.mcp]
+startup_timeout_ms = ${startupTimeoutMs}
+
+[profiles.default]
+`);
+      expect(() => loadAgentConfig({ cwd: tmpCwd })).toThrow(/schema/i);
+    }
+  });
+
   it("defaults session scope to shared and merges project/profile overrides deepest-last", () => {
     writeGlobal(`
 active_profile = "work"

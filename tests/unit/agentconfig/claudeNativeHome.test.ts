@@ -45,6 +45,7 @@ describe("renderClaude — native sync home resolution", () => {
             url: "https://example.com/mcp"
           } as never
         },
+        mcpStartupTimeoutMs: null,
         yolo: null,
         reserved: { skills: {}, agents: {}, hooks: {}, permissions: {} }
       } as never
