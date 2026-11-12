@@ -149,7 +149,10 @@ export function renderCodex(input: CodexRenderInput): RenderResult {
     notes.push(`using external provider "${input.resolved.provider.id}" for Codex`);
   }
 
-  const mcpToml = renderCodexMcpToml(input.resolved.mcpServers);
+  const mcpToml = renderCodexMcpToml(
+    input.resolved.mcpServers,
+    input.resolved.mcpStartupTimeoutMs
+  );
   if (next.length === 0 && mcpToml.length > 0) {
     notes.push(
       `Codex config not found at ${codexConfigPath}; skipping MCP injection. ` +
@@ -289,7 +292,10 @@ function getStringField(doc: Record<string, unknown>, key: string): string | nul
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function renderCodexMcpToml(servers: Record<string, McpServerEntry>): string {
+function renderCodexMcpToml(
+  servers: Record<string, McpServerEntry>,
+  startupTimeoutMs: number | null
+): string {
   if (Object.keys(servers).length === 0) return "";
   // Build a single TOML document `{ mcp_servers: { name: {...} } }` and feed
   // smol-toml's stringify so nested maps (env, http_headers) emit valid TOML
@@ -307,10 +313,12 @@ function renderCodexMcpToml(servers: Record<string, McpServerEntry>): string {
       if (server.args) entry.args = server.args;
       if (server.env) entry.env = server.env;
       if (server.cwd) entry.cwd = server.cwd;
+      if (startupTimeoutMs !== null) entry.startup_timeout_ms = startupTimeoutMs;
       out.mcp_servers[name] = entry;
     } else {
       const entry: Record<string, unknown> = { url: server.url };
       if (server.headers) entry.http_headers = server.headers;
+      if (startupTimeoutMs !== null) entry.startup_timeout_ms = startupTimeoutMs;
       out.mcp_servers[name] = entry;
     }
   }
@@ -333,9 +341,19 @@ export function renderClaude(input: ClaudeRenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
   const cliArgs: string[] = [];
+  const hasMcpServers = Object.keys(input.resolved.mcpServers).length > 0;
+  const startupTimeoutEnv: Record<string, string> =
+    hasMcpServers && input.resolved.mcpStartupTimeoutMs !== null
+      ? { MCP_TIMEOUT: String(input.resolved.mcpStartupTimeoutMs) }
+      : {};
 
   if (input.nativeSync) {
-    writes.push(...renderClaudeNativeWrites(input));
+    writes.push(
+      ...renderClaudeNativeWrites({
+        ...input,
+        env: { ...input.env, ...startupTimeoutEnv }
+      })
+    );
     if (input.resolved.instructions) {
       notes.push(
         "Claude: instructions fan-out is unsupported (Claude has no out-of-tree " +
@@ -348,8 +366,7 @@ export function renderClaude(input: ClaudeRenderInput): RenderResult {
 
   const mcpJsonPath = claudeMcpConfigPath(input.sessionScope, input.profileName);
 
-  const serverCount = Object.keys(input.resolved.mcpServers).length;
-  if (serverCount > 0) {
+  if (hasMcpServers) {
     const content = renderClaudeMcp(input.resolved.mcpServers);
     const existing = fs.existsSync(mcpJsonPath) ? fs.readFileSync(mcpJsonPath, "utf8") : null;
     if (existing !== content) {
@@ -376,7 +393,7 @@ export function renderClaude(input: ClaudeRenderInput): RenderResult {
     );
   }
 
-  return { writes, envOverlay: {}, cliArgs, notes };
+  return { writes, envOverlay: startupTimeoutEnv, cliArgs, notes };
 }
 
 function renderClaudeNativeWrites(input: ClaudeRenderInput): FileWrite[] {
@@ -505,6 +522,14 @@ const PI_EXTENSION_DIRNAME = "copillm-mcp";
 export function renderPi(input: RenderInput): RenderResult {
   const writes: FileWrite[] = [];
   const notes: string[] = [];
+  if (
+    input.resolved.mcpStartupTimeoutMs !== null &&
+    Object.values(input.resolved.mcpServers).some((server) => server.transport !== "sse")
+  ) {
+    notes.push(
+      "pi: MCP startup_timeout_ms is not supported by Pi and was not applied."
+    );
+  }
 
   const piAgent = piAgentDir(input.sessionScope, input.profileName);
 
@@ -842,7 +867,10 @@ export function renderCopilot(input: RenderInput): RenderResult {
   );
   const serverCount = Object.keys(input.resolved.mcpServers).length;
   if (serverCount > 0) {
-    const content = renderCopilotMcp(input.resolved.mcpServers);
+    const content = renderCopilotMcp(
+      input.resolved.mcpServers,
+      input.resolved.mcpStartupTimeoutMs
+    );
     const existing = fs.existsSync(mcpConfigPath) ? fs.readFileSync(mcpConfigPath, "utf8") : null;
     if (existing !== content) {
       writes.push({
@@ -853,6 +881,9 @@ export function renderCopilot(input: RenderInput): RenderResult {
       });
     }
     cliArgs.push("--additional-mcp-config", `@${mcpConfigPath}`);
+    if (input.resolved.mcpStartupTimeoutMs !== null) {
+      notes.push("Copilot CLI: MCP timeout also applies to tool discovery and tool calls.");
+    }
   } else if (fs.existsSync(mcpConfigPath)) {
     fs.rmSync(mcpConfigPath, { force: true });
     notes.push(`Removed stale ${mcpConfigPath} (no MCP servers in active profile).`);
@@ -866,7 +897,10 @@ export function renderCopilot(input: RenderInput): RenderResult {
   };
 }
 
-function renderCopilotMcp(servers: Record<string, McpServerEntry>): string {
+function renderCopilotMcp(
+  servers: Record<string, McpServerEntry>,
+  startupTimeoutMs: number | null
+): string {
   const out: Record<string, unknown> = {};
   for (const [name, server] of Object.entries(servers)) {
     if (server.transport === "stdio") {
@@ -878,6 +912,7 @@ function renderCopilotMcp(servers: Record<string, McpServerEntry>): string {
       if (server.args) entry.args = server.args;
       if (server.env) entry.env = server.env;
       if (server.cwd) entry.cwd = server.cwd;
+      if (startupTimeoutMs !== null) entry.timeout = startupTimeoutMs;
       out[name] = entry;
     } else {
       const entry: Record<string, unknown> = {
@@ -886,6 +921,7 @@ function renderCopilotMcp(servers: Record<string, McpServerEntry>): string {
         tools: ["*"]
       };
       if (server.headers) entry.headers = server.headers;
+      if (startupTimeoutMs !== null) entry.timeout = startupTimeoutMs;
       out[name] = entry;
     }
   }
