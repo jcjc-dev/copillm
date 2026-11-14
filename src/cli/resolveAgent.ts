@@ -302,11 +302,71 @@ export async function resolveAgent(agent: AgentName, opts: ResolveOptions = {}):
     throw new Error(`${binName}@${target} not in cache and --offline is set.`);
   }
 
-  // 4. Install. We normally install directly into the canonical version
-  // directory and write `version.txt` LAST as the completion marker. If an
-  // already-corrupted Windows cache is still held open by a running agent,
-  // install a complete replacement beside it instead of requiring the user
-  // to stop that process.
+  // 4. Install. A failed install on the unpinned "latest" flow degrades to
+  // the newest cached version instead of failing the launch — latest is
+  // best-effort, the cache is the guarantee. Pinned installs stay strict:
+  // the user asked for an exact version, so silently running a different one
+  // would be surprising.
+  try {
+    return await installTargetVersion({
+      agentRoot,
+      target,
+      pkg,
+      binName,
+      npmExe,
+      npmUserConfigPath,
+      integration,
+      log
+    });
+  } catch (error) {
+    if (pin.version) throw error;
+    const last = pickLastCached(agentRoot, integration);
+    if (!last) throw error;
+    const message = error instanceof Error ? error.message : String(error);
+    // Mark the target as currently uninstallable (latestVersion: null) so
+    // launches for the rest of the version-cache TTL go straight to the
+    // cache instead of each paying for an install that is likely to fail
+    // again — the same degraded-mode signal a failed `npm view` writes.
+    writeAgentVersionCache(agentRoot, pkg, null, now(), log);
+    log(
+      `\u26a0 could not install ${pkg}@${target} (${message}); ` +
+        `using cached ${binName} v${last.version}`
+    );
+    return {
+      source: "cache",
+      binPath: last.binPath,
+      version: last.version,
+      packageName: pkg,
+      cacheDir: last.dir,
+      prunedCount: 0,
+      displayLine: `\u2192 ${binName} (cached fallback, ${displayPath(last.dir)}, v${last.version})`
+    };
+  }
+}
+
+interface InstallTargetOptions {
+  agentRoot: string;
+  target: string;
+  pkg: string;
+  binName: string;
+  npmExe: string;
+  npmUserConfigPath: null | string;
+  integration: AgentIntegration;
+  log: (line: string) => void;
+}
+
+/**
+ * Download and verify `pkg@target` into `agentRoot`. We normally install
+ * directly into the canonical version directory and write `version.txt`
+ * LAST as the completion marker. If an already-corrupted Windows cache is
+ * still held open by a running agent, install a complete replacement beside
+ * it instead of requiring the user to stop that process.
+ *
+ * Throws on any failure; the caller decides whether that is fatal (pinned
+ * installs) or degrades to the newest cached version (unpinned).
+ */
+async function installTargetVersion(opts: InstallTargetOptions): Promise<ResolveResult> {
+  const { agentRoot, target, pkg, binName, npmExe, npmUserConfigPath, integration, log } = opts;
   log(`\u2192 ${binName} (installing ${pkg}@${target} into ${displayPath(agentRoot)} \u2026)`);
   fs.mkdirSync(agentRoot, { recursive: true });
 

@@ -1,6 +1,6 @@
 {
   "name": "copillm",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "Local Copilot proxy CLI (OpenAI/Anthropic-compatible)",
   "license": "MIT",
   "type": "module",

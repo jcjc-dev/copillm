@@ -488,6 +488,139 @@ describe("resolveAgent (npm view fallback)", async () => {
   });
 });
 
+// Install-failure fallback: when a newer version is known but cannot be
+// downloaded, an unpinned launch must degrade to the newest cached version
+// instead of failing outright. Pinned installs stay strict.
+describe("resolveAgent (install failure fallback)", async () => {
+  const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
+
+  /**
+   * Fake npm where `view` reports a newer latest version but `install`
+   * always fails, mimicking a network/registry failure mid-download.
+   */
+  function failingInstallNpm(dir: string, latestVersion: string): string {
+    fs.mkdirSync(dir, { recursive: true });
+    const impl = `const argv = process.argv.slice(2);
+if (argv[0] === 'view') {
+  process.stdout.write(${JSON.stringify(latestVersion)} + "\\n");
+  process.exit(0);
+}
+if (argv[0] === 'install') {
+  console.error('fake-npm: install failed');
+  process.exit(1);
+}
+process.exit(0);
+`;
+    if (process.platform === "win32") {
+      const jsPath = path.join(dir, "fake-npm-impl.js");
+      fs.writeFileSync(jsPath, impl);
+      const cmdPath = path.join(dir, "fake-npm.cmd");
+      fs.writeFileSync(cmdPath, `@node "${jsPath}" %*\r\n`);
+      return cmdPath;
+    }
+    const shPath = path.join(dir, "fake-npm");
+    fs.writeFileSync(shPath, `#!/usr/bin/env node\n${impl}`, { mode: 0o755 });
+    return shPath;
+  }
+
+  function seedCachedBin(cacheRoot: string, agent: string, version: string): string {
+    const versionDir = path.join(cacheRoot, agent, version);
+    const binDir = path.join(versionDir, "node_modules", ".bin");
+    fs.mkdirSync(binDir, { recursive: true });
+    const binName = process.platform === "win32" ? `${agent}.cmd` : agent;
+    const binPath = path.join(binDir, binName);
+    if (process.platform === "win32") {
+      fs.writeFileSync(binPath, `@echo ${version}\r\n`);
+    } else {
+      fs.writeFileSync(binPath, `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+    }
+    fs.writeFileSync(path.join(versionDir, "version.txt"), `${version}\n`);
+    return binPath;
+  }
+
+  function writeFreshVersionCache(agentRoot: string, packageName: string, latestVersion: string, checkedAt: number): void {
+    fs.mkdirSync(agentRoot, { recursive: true });
+    fs.writeFileSync(
+      path.join(agentRoot, ".latest-version.json"),
+      JSON.stringify({ version: 1, packageName, latestVersion, checkedAt })
+    );
+  }
+
+  it("falls back to the newest cached version when the download of a newer one fails", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-install-fallback-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const expectedBin = seedCachedBin(cacheRoot, "codex", "1.2.3");
+      // Fresh metadata says 9.9.9 is latest, so the resolver commits to
+      // installing it even though only 1.2.3 is cached.
+      writeFreshVersionCache(path.join(cacheRoot, "codex"), "@openai/codex", "9.9.9", 1_000);
+      const npmExecutable = failingInstallNpm(path.join(tmp, "fakenpm"), "9.9.9");
+
+      const logs: string[] = [];
+      const result = await resolveAgent("codex", {
+        cacheRoot,
+        npmExecutable,
+        now: () => 1_000,
+        log: (line) => logs.push(line)
+      });
+
+      expect(result.source).toBe("cache");
+      expect(result.binPath).toBe(expectedBin);
+      expect(result.version).toBe("1.2.3");
+      expect(
+        logs.some(
+          (line) => /could not install/i.test(line) && /9\.9\.9/.test(line) && /1\.2\.3/.test(line)
+        )
+      ).toBe(true);
+
+      // The failed target is recorded as uninstallable so launches for the
+      // rest of the TTL window go straight to the cache instead of each
+      // retrying a download that is likely to fail again.
+      const meta = JSON.parse(
+        fs.readFileSync(path.join(cacheRoot, "codex", ".latest-version.json"), "utf8")
+      );
+      expect(meta.latestVersion).toBeNull();
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("propagates the install error when the cache is empty", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-install-no-cache-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      const npmExecutable = failingInstallNpm(path.join(tmp, "fakenpm"), "9.9.9");
+
+      await expect(
+        resolveAgent("codex", { cacheRoot, npmExecutable, now: () => 1_000, log: () => {} })
+      ).rejects.toThrow(/npm install .* failed/i);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("stays strict when a pinned version cannot be installed", async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "copillm-resolve-install-pinned-"));
+    try {
+      const cacheRoot = path.join(tmp, "cache");
+      seedCachedBin(cacheRoot, "codex", "1.2.3");
+      const npmExecutable = failingInstallNpm(path.join(tmp, "fakenpm"), "9.9.9");
+
+      await expect(
+        resolveAgent("codex", {
+          cacheRoot,
+          npmExecutable,
+          pinnedSpec: "9.9.9",
+          now: () => 1_000,
+          log: () => {}
+        })
+      ).rejects.toThrow(/npm install .* failed/i);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("resolveAgent (non-blocking version refresh)", async () => {
   const { resolveAgent } = await import("../../../src/cli/resolveAgent.js");
 
