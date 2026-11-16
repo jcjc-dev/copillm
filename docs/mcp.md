@@ -314,7 +314,20 @@ samplingParams = { temperature = 1.0, top_p = 0.95 }
 | `api_key_env` | Name of an environment variable holding the API key. The value is referenced, never written to disk. |
 | `discovery_path` | Path appended to `base_url` for OpenAI-style model discovery (default `/models`). |
 | `discover_models` | Whether to query the discovery endpoint and merge discovered model ids (default `true`). |
-| `models` | Optional static model list (pi `models` entry shape) used when discovery is off or fails. |
+| `models` | Optional static model list (pi `models.json` entry shape) used when discovery is off or fails. |
+
+Each entry in `models` mirrors a pi `models.json` model entry (camelCase keys):
+
+| Field | Purpose |
+| ----- | ------- |
+| `id` | Model id (required). |
+| `name` | Optional display name. |
+| `contextWindow` | Context limit in tokens. |
+| `maxTokens` | Output token limit. |
+| `reasoning` | Whether the model supports reasoning/thinking. |
+| `input` | Input modes: `text` and/or `image`. |
+| `samplingParams` | Extra sampling parameters sent to the API. |
+| `thinkingLevelMap` | Optional per-thinking-level provider values (pi `thinkingLevelMap`). |
 
 Discovery is best-effort: a failed or slow endpoint falls back to the static
 `models` list, or the provider is omitted with a note when neither is available.
@@ -332,10 +345,13 @@ model = "deepseek/deepseek-v4-flash-0731"
 thinking_level = "medium"
 ```
 
-`pi_models` are applied in native Copilot mode (the default). `copillm pi`
-renders them into pi's `models.json` on launch; use `copillm config sync --agent pi`
-to render them without launching. Requires copillm 0.5.4 or newer for
-`thinking_level` support.
+`pi_models` are rendered in native Copilot mode (the default; set
+`COPILLM_PI_NATIVE_COPILOT=0` to opt out). `copillm pi` renders them into pi's
+`models.json` at launch **unless** the active profile selects an external
+`provider` block, in which case that provider is used instead. `copillm config sync
+--agent pi` renders them whenever native Copilot mode is enabled, so it can
+materialize providers that a launcher for a provider-backed profile would not
+use. Requires copillm 0.5.4 or newer for `thinking_level` support.
 
 ## External model providers
 
