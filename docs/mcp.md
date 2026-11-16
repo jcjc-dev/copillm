@@ -231,25 +231,111 @@ These preferences affect only `copillm copilot`, not other agent launchers.
 
 ## Pi launch preferences
 
-Set Pi's default model and thinking level in `[defaults.pi]`, or override either
-per profile in `[profiles.<name>.pi]`. These are passed to the Pi launch as
-`--model` and `--thinking` defaults; explicit CLI selections take precedence.
-This does not modify Pi's own `settings.json`. Thinking levels are `off`,
-`minimal`, `low`, `medium`, `high`, `xhigh`, and `max`; the selected model may
-limit which levels it supports.
+Copilot is just one provider pi can use. The default model and thinking level
+are set in `[defaults.pi]`, or overridden per profile in `[profiles.<name>.pi]`.
+These are passed to the Pi launch as `--model` and `--thinking` defaults;
+explicit CLI selections take precedence. This does not modify Pi's own
+`settings.json`. Thinking levels are `off`, `minimal`, `low`, `medium`, `high`,
+`xhigh`, and `max`; the selected model may limit which levels it supports.
+
+The `model` value can be:
+
+- a **Copilot model id** available to your account (e.g. `gpt-6-luna`), or
+- a **bring-your-own model** from a `pi_models` provider, referenced as
+  `<provider-id>/<model-id>` (e.g. `deepseek/deepseek-v4-flash-0731`). See
+  [Bring your own models](#bring-your-own-models-for-pi) below.
 
 ```toml
 [defaults.pi]
-model = "gpt-6-luna"
+model = "gpt-6-luna"          # a Copilot model
 thinking_level = "xhigh"
 
 [profiles.work.pi]
-model = "another-model"
+model = "deepseek/deepseek-v4-flash-0731"   # a BYO pi_models model
 thinking_level = "high"
 ```
 
-When a profile selects an external provider, that provider's configured model
-is used instead of this Copilot model preference.
+> `thinking_level` requires copillm 0.5.4 or newer.
+
+When a profile selects a `provider` block (replacing Copilot with a single
+external endpoint), that provider's configured model is used instead of this
+`[defaults.pi]` preference.
+
+## Bring your own models for pi
+
+Copilot is one model source, but you can also **bring your own models (BYO)**
+for pi — for example a local vLLM/Ollama/DeepSeek endpoint, a self-hosted
+OpenAI-compatible server, or a hosted gateway. The `pi_models` block adds these
+as additional pi providers that **coexist with Copilot**, so you can pick
+between Copilot models and your own models at launch time without replacing
+your profile's overall provider.
+
+Define each endpoint under `[defaults.pi_models.<id>]` (all profiles) or
+`[profiles.<name>.pi_models.<id>]` (one profile). copillm discovers the model
+list from the endpoint's OpenAI-style `/models` route and renders the provider
+into pi's `models.json`, so pi can connect and use those models alongside the
+Copilot catalog. Each `pi_models` entry becomes an independent pi provider,
+keyed by `<id>`, and its models are referenced as `<id>/<model-id>`.
+
+> **`pi_models` vs the `provider` block.** `pi_models` **adds** providers for pi
+> only and coexists with Copilot. If instead you want to **replace** Copilot
+> entirely for a profile with a single external endpoint shared by codex, pi,
+> and copilot, use the [`provider` block](#external-model-providers) instead.
+
+### Schema
+
+```toml
+[defaults.pi_models.deepseek]
+name = "DeepSeek"
+base_url = "http://192.168.8.116:8890/v1"
+api = "openai-completions"        # openai-completions | openai-responses | anthropic-messages
+api_key_env = "DEEPSEEK_API_KEY"  # or api_key for a literal; omit for keyless local endpoints
+discovery_path = "/models"        # default "/models"
+discover_models = true            # query /models and merge discovered ids (default true)
+
+# Optional static model metadata (pi models.json entry shape; camelCase keys).
+# Used when discovery is off or fails; also enriches discovered models by id.
+[[defaults.pi_models.deepseek.models]]
+id = "deepseek-v4-flash-0731"
+name = "Deep V4 Flash"
+input = ["text"]
+reasoning = true
+contextWindow = 1048576
+maxTokens = 384000
+samplingParams = { temperature = 1.0, top_p = 0.95 }
+```
+
+| Field | Purpose |
+| ----- | ------- |
+| `name` | Optional display name for the provider. |
+| `base_url` | Endpoint base URL. |
+| `api` | Request API: `openai-completions`, `openai-responses`, or `anthropic-messages` (default `openai-completions`). |
+| `api_key` | Literal API key. Prefer `api_key_env`; avoid putting secrets in `agent.toml`. |
+| `api_key_env` | Name of an environment variable holding the API key. The value is referenced, never written to disk. |
+| `discovery_path` | Path appended to `base_url` for OpenAI-style model discovery (default `/models`). |
+| `discover_models` | Whether to query the discovery endpoint and merge discovered model ids (default `true`). |
+| `models` | Optional static model list (pi `models` entry shape) used when discovery is off or fails. |
+
+Discovery is best-effort: a failed or slow endpoint falls back to the static
+`models` list, or the provider is omitted with a note when neither is available.
+Static metadata wins for ids present in both.
+
+### Selecting a BYO model as the default
+
+Set the default model (and optional thinking level) in `[defaults.pi]` or per
+profile in `[profiles.<name>.pi]`, referencing a BYO model as
+`<provider-id>/<model-id>`:
+
+```toml
+[defaults.pi]
+model = "deepseek/deepseek-v4-flash-0731"
+thinking_level = "medium"
+```
+
+`pi_models` are applied in native Copilot mode (the default). `copillm pi`
+renders them into pi's `models.json` on launch; use `copillm config sync --agent pi`
+to render them without launching. Requires copillm 0.5.4 or newer for
+`thinking_level` support.
 
 ## External model providers
 
