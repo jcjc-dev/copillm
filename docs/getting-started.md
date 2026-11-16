@@ -61,6 +61,12 @@ copillm codex --help
 
 That's it — you're talking to your Copilot seat through the agent of your choice.
 
+Copilot is one model source, but you're not limited to it. To use **your own
+models** (a local vLLM/Ollama/DeepSeek server, a hosted gateway, or any
+OpenAI-compatible endpoint) alongside Copilot in pi, add `pi_models` to
+`agent.toml` and select one as the default in `[defaults.pi]`. See
+[Bring your own models](mcp/#bring-your-own-models-for-pi).
+
 ## 3. (Optional) Run the daemon manually
 
 If you'd rather manage the daemon yourself:

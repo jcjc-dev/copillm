@@ -53,7 +53,7 @@ copillm will:
 - **[Commands](commands/)** — every command, grouped by domain (`auth`, `claude`, `codex`, `copilot`, `pi`, `daemon`, `env`, `models`, `config`)
 - **[Using with Claude Code](claude-code/)** — environment wiring and the `[1m]` 1M-context alias
 - **[Using with Codex CLI](codex/)** — environment wiring and `config.toml` generation
-- **[MCP & `agent.toml`](mcp/)** — declare MCP servers once, fan out to every agent
+- **[MCP & `agent.toml`](mcp/)** — declare MCP servers once, fan out to every agent; configure Copilot models or bring your own models
 - **[HTTP API reference](http-api/)** — endpoints and translation behaviour
 - **[Development & CI](development/)** — building from source, PR gate, upstream e2e, release pipeline
 

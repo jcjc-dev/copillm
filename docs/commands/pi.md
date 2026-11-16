@@ -30,6 +30,7 @@ Copillm reserves a small set of flags. Each has a long canonical form (`--copill
 | `--use <spec>` | `--copillm-use <spec>` | Pin the pi version (e.g. `0.3.0` or `@earendil-works/pi-coding-agent@0.3.0`). |
 | `--debug` | `--copillm-debug` | Enable debug endpoints when auto-starting the daemon. |
 | `--no-config` | `--copillm-no-config` | Skip `agent.toml` fan-out for this launch. |
+| `--copillm-copilot` | — | Feed the Copilot token to pi's native Copilot provider (no daemon). Forces native mode, so `pi_models` are rendered even for a provider-backed profile. |
 | `--yolo` | — | **No effect for pi.** pi has no blanket-approve switch, so copillm forwards your args unchanged and prints a one-line warning. Use pi's per-tool approvals instead. |
 
 Examples:
@@ -41,7 +42,19 @@ copillm --debug pi                   # copillm daemon diagnostics
 
 ## What it does
 
-When the active profile has no external provider, copillm uses native Copilot mode by default: it obtains a Copilot token, configures pi's built-in `github-copilot` provider for the account's API host, and does not start the copillm daemon. Pi's default model and thinking level can come from `[defaults.pi] model` and `thinking_level` in `~/.copillm/agent.toml`; copillm passes them as `--model` and `--thinking` defaults without editing Pi's `settings.json`. Explicit CLI options take precedence.
+When the active profile has no external provider, copillm uses native Copilot mode by default: it obtains a Copilot token, configures pi's built-in `github-copilot` provider for the account's API host, and does not start the copillm daemon.
+
+Copilot is **one** model source pi can use. You can also bring your own models
+(BYO) — a local vLLM/Ollama/DeepSeek server, a hosted gateway, or any
+OpenAI-compatible endpoint — via the `pi_models` block in `agent.toml`. Those
+providers are rendered into pi's `models.json` alongside Copilot, and their
+models are referenced as `<provider-id>/<model-id>`. See
+[Bring your own models](../mcp/#bring-your-own-models-for-pi).
+
+Pi's default model and thinking level can come from `[defaults.pi] model` and
+`thinking_level` in `~/.copillm/agent.toml`; copillm passes them as `--model`
+and `--thinking` defaults without editing Pi's `settings.json`. Explicit CLI
+options take precedence.
 
 Set `COPILLM_PI_NATIVE_COPILOT=0` to use the retained legacy flow instead: it starts the daemon and refreshes pi's copillm proxy model catalogue. Other false-like values (`false`, `no`, `off`, or empty) also select the legacy flow.
 
@@ -61,7 +74,10 @@ instead writes a single external provider to pi's copillm-owned
 credential. The provider's selected API, model, context/output limits,
 reasoning setting, and compatibility options are applied to pi. The
 credential is referenced by environment-variable name and is not written to
-`models.json`.
+`models.json`. With a provider-backed profile, `pi_models` BYO providers are
+skipped by default — unless native mode is forced with `--copillm-copilot`,
+which renders `pi_models` as well. See
+[Bring your own models](../mcp/#bring-your-own-models-for-pi).
 
 For MCP fan-out into pi, see [MCP & `agent.toml`](../../mcp/#pi).
 
@@ -102,4 +118,11 @@ model = "gpt-6-luna"
 thinking_level = "xhigh"
 ```
 
-Supported levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. A profile can override either with `[profiles.<name>.pi]`. Explicit command-line `--model` / `--thinking` selections take precedence. The model must be available to your Copilot account and support the selected level.
+Supported levels are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. A profile can override either with `[profiles.<name>.pi]`. Explicit command-line `--model` / `--thinking` selections take precedence.
+
+The `model` value is either a **Copilot model id** available to your account, or
+a **BYO model** from a `pi_models` provider referenced as
+`<provider-id>/<model-id>` (e.g. `deepseek/deepseek-v4-flash-0731`). When using
+a BYO model, it does **not** need to be a Copilot model — only the selected
+model must support the chosen thinking level. `thinking_level` requires
+copillm 0.5.4 or newer.
