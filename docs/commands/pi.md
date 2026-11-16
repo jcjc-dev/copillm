@@ -30,6 +30,7 @@ Copillm reserves a small set of flags. Each has a long canonical form (`--copill
 | `--use <spec>` | `--copillm-use <spec>` | Pin the pi version (e.g. `0.3.0` or `@earendil-works/pi-coding-agent@0.3.0`). |
 | `--debug` | `--copillm-debug` | Enable debug endpoints when auto-starting the daemon. |
 | `--no-config` | `--copillm-no-config` | Skip `agent.toml` fan-out for this launch. |
+| `--copillm-copilot` | — | Feed the Copilot token to pi's native Copilot provider (no daemon). Forces native mode, so `pi_models` are rendered even for a provider-backed profile. |
 | `--yolo` | — | **No effect for pi.** pi has no blanket-approve switch, so copillm forwards your args unchanged and prints a one-line warning. Use pi's per-tool approvals instead. |
 
 Examples:
