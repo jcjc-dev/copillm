@@ -73,7 +73,10 @@ instead writes a single external provider to pi's copillm-owned
 credential. The provider's selected API, model, context/output limits,
 reasoning setting, and compatibility options are applied to pi. The
 credential is referenced by environment-variable name and is not written to
-`models.json`.
+`models.json`. With a provider-backed profile, `pi_models` BYO providers are
+skipped by default — unless native mode is forced with `--copillm-copilot`,
+which renders `pi_models` as well. See
+[Bring your own models](../mcp/#bring-your-own-models-for-pi).
 
 For MCP fan-out into pi, see [MCP & `agent.toml`](../../mcp/#pi).
 

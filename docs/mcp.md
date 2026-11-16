@@ -6,7 +6,7 @@ nav_order: 6
 
 # MCP & `agent.toml`
 
-copillm is a **MCP and model configuration aggregator**. You declare your MCP servers and, optionally, one external model provider once in `~/.copillm/agent.toml`, and copillm fans them out to each supported coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`, or `copillm copilot`). Separate from that shared fan-out, pi also supports its own bring-your-own-model providers (`pi_models`) that coexist with Copilot and are pi-only — see [Bring your own models for pi](#bring-your-own-models-for-pi).
+copillm is a **MCP and model configuration aggregator**. You declare your MCP servers (and, optionally, one external model provider) once in `~/.copillm/agent.toml`, and copillm fans them out to each supported coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`, or `copillm copilot`). MCP servers fan out to **every** agent; the external `provider` block currently applies to Codex, pi, and Copilot CLI (Claude Code does not use it yet). Separate from that shared fan-out, pi also supports its own bring-your-own-model providers (`pi_models`) that coexist with Copilot and are pi-only — see [Bring your own models for pi](#bring-your-own-models-for-pi).
 
 copillm itself does **not** speak the MCP wire protocol — it just renders the right files for each downstream agent.
 
