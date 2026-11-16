@@ -6,7 +6,7 @@ nav_order: 6
 
 # MCP & `agent.toml`
 
-copillm is a **MCP and model configuration aggregator**. You declare your MCP servers and, optionally, one external model provider once in `~/.copillm/agent.toml`, and copillm fans them out to each supported coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`, or `copillm copilot`).
+copillm is a **MCP and model configuration aggregator**. You declare your MCP servers and, optionally, one external model provider once in `~/.copillm/agent.toml`, and copillm fans them out to each supported coding agent's native config format on launch (`copillm claude`, `copillm codex`, `copillm pi`, or `copillm copilot`). Separate from that shared fan-out, pi also supports its own bring-your-own-model providers (`pi_models`) that coexist with Copilot and are pi-only — see [Bring your own models for pi](#bring-your-own-models-for-pi).
 
 copillm itself does **not** speak the MCP wire protocol — it just renders the right files for each downstream agent.
 
@@ -347,11 +347,13 @@ thinking_level = "medium"
 
 `pi_models` are rendered in native Copilot mode (the default; set
 `COPILLM_PI_NATIVE_COPILOT=0` to opt out). `copillm pi` renders them into pi's
-`models.json` at launch **unless** the active profile selects an external
-`provider` block, in which case that provider is used instead. `copillm config sync
---agent pi` renders them whenever native Copilot mode is enabled, so it can
-materialize providers that a launcher for a provider-backed profile would not
-use. Requires copillm 0.5.4 or newer for `thinking_level` support.
+`models.json` when native Copilot mode is active. When the active profile
+selects an external `provider` block, the launcher normally uses that provider
+instead — unless native mode is forced with `--copillm-copilot`, which renders
+`pi_models` even for a provider-backed profile. `copillm config sync --agent pi`
+renders them whenever native Copilot mode is enabled, so it can materialize
+providers that a launcher for a provider-backed profile would not use. Requires
+copillm 0.5.4 or newer for `thinking_level` support.
 
 ## External model providers
 
